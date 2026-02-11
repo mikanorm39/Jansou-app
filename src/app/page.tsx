@@ -1,21 +1,52 @@
-export default function Home() {
-  const checkKeys = () => {
-    // ÀÛ‚É‚ÍƒZƒLƒ…ƒŠƒeƒBãƒuƒ‰ƒEƒU‚©‚ç’¼Ú‚ÍŒ©‚¦‚Ü‚¹‚ñ‚ªA
-    // ƒT[ƒo[ƒTƒCƒh‚Å“®‚­‚É•K—v‚¾‚Æ‚¢‚¤‚±‚Æ‚ğŠm”F‚·‚é€”õ‚Å‚·B
-    console.log("OpenAI Key exists:", !!process.env.OPENAI_API_KEY);
-    console.log("ElevenLabs Key exists:", !!process.env.ELEVENLABS_API_KEY);
-    alert("ƒRƒ“ƒ\[ƒ‹iF12ƒL[j‚ğŠm”F‚µ‚Ä‚­‚¾‚³‚¢Btrue‚Æo‚ê‚Î€”õOK‚Å‚·I");
-  };
+"use client";
+import { useState } from "react";
+
+export default function TitlePage() {
+  const [gameState, setGameState] = useState<
+    "title" | "char_select" | "playing"
+  >("title");
+  const [character, setCharacter] = useState("");
 
   return (
-    <main className="p-24">
-      <h1 className="text-2xl font-bold mb-4">‘›ƒvƒƒWƒFƒNƒgn“®I</h1>
-      <button
-        onClick={checkKeys}
-        className="bg-blue-500 text-white px-4 py-2 rounded"
-      >
-        İ’èŠm”Fƒ{ƒ^ƒ“
-      </button>
+    <main className="flex min-h-screen flex-col items-center justify-center bg-green-900 text-white">
+      {gameState === "title" && (
+        <div className="text-center">
+          <h1 className="text-6xl font-bold mb-8">æœ¬æ ¼ä¸‰äººéº»é›€ï¼šå®Ÿæ³</h1>
+          <button
+            onClick={() => setGameState("char_select")}
+            className="px-8 py-4 bg-yellow-600 hover:bg-yellow-500 rounded-full text-2xl font-bold transition"
+          >
+            ã‚²ãƒ¼ãƒ é–‹å§‹
+          </button>
+        </div>
+      )}
+
+      {gameState === "char_select" && (
+        <div className="text-center">
+          <h2 className="text-4xl mb-8">å®Ÿæ³ã‚­ãƒ£ãƒ©ã‚¯ã‚¿ãƒ¼ã‚’é¸æŠ</h2>
+          <div className="flex gap-4">
+            {["ãŠå¬¢æ§˜", "ãƒ¤ãƒ³ã‚­ãƒ¼", "è„±åŠ›ç³»ç”·å­"].map((char) => (
+              <button
+                key={char}
+                onClick={() => {
+                  setCharacter(char);
+                  setGameState("playing");
+                }}
+                className="p-6 bg-white text-black rounded-lg hover:bg-gray-200"
+              >
+                {char}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {gameState === "playing" && (
+        <div>
+          <h2 className="text-2xl">å¯¾å±€ä¸­ï¼šå®Ÿæ³æ‹…å½“ {character}</h2>
+          {/* ã“ã“ã«éº»é›€ç›¤é¢ã‚³ãƒ³ãƒãƒ¼ãƒãƒ³ãƒˆã‚’å…¥ã‚Œã‚‹ */}
+        </div>
+      )}
     </main>
   );
 }
