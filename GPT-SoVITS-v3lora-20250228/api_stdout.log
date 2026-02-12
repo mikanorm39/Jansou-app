@@ -1,0 +1,37 @@
+INFO:     127.0.0.1:61206 - "GET /?text=hello&text_language=en HTTP/1.1" 400 Bad Request
+INFO:     127.0.0.1:50159 - "GET /?text=hello&text_language=en HTTP/1.1" 400 Bad Request
+INFO:     127.0.0.1:52643 - "GET /change_refer?refer_wav_path=C%3A%5Cprogram1%5Cjyansou%5Cjansou-app%5CGPT-SoVITS-v3lora-20250228%5CGPT_SoVITS%5CBigVGAN%5Cdemo%5Cexamples%5Cqueen_24k.wav&prompt_text=hello&prompt_language=en HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49699 - "GET /?text=hello&text_language=en HTTP/1.1" 200 OK
+T2S Decoding EOS [264 -> 276]
+INFO:     127.0.0.1:54195 - "GET /change_refer?refer_wav_path=C%3A%5Cprogram1%5Cjyansou%5Cjansou-app%5CGPT-SoVITS-v3lora-20250228%5CGPT_SoVITS%5CBigVGAN%5Cdemo%5Cexamples%5Cqueen_24k.wav&prompt_text=hello&prompt_language=en HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54196 - "GET /?text=hello&text_language=ja HTTP/1.1" 200 OK
+T2S Decoding EOS [264 -> 295]
+INFO:     127.0.0.1:49349 - "GET /change_refer?refer_wav_path=C%3A%5Cprogram1%5Cjyansou%5Cjansou-app%5CGPT-SoVITS-v3lora-20250228%5CGPT_SoVITS%5CBigVGAN%5Cdemo%5Cexamples%5Cqueen_24k.wav&prompt_text=hello&prompt_language=en HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49350 - "GET /?text=%E3%82%88%E3%82%8D%E3%81%97%E3%81%8F&text_language=ja HTTP/1.1" 200 OK
+T2S Decoding EOS [264 -> 292]
+INFO:     127.0.0.1:54788 - "GET /change_refer?refer_wav_path=C%3A%5Cprogram1%5Cjyansou%5Cjansou-app%5CGPT-SoVITS-v3lora-20250228%5CGPT_SoVITS%5CBigVGAN%5Cdemo%5Cexamples%5Cqueen_24k.wav&prompt_text=hello&prompt_language=en HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54789 - "GET /?text=%E3%82%88%E3%82%8D%E3%81%97%E3%81%8F%E3%81%8A%E9%A1%98%E3%81%84%E3%81%97%E3%81%BE%E3%81%99%E3%82%8F%EF%BC%81&text_language=ja HTTP/1.1" 200 OK
+T2S Decoding EOS [264 -> 282]
+INFO:     127.0.0.1:53494 - "GET /change_refer?refer_wav_path=C%3A%5Cprogram1%5Cjyansou%5Cjansou-app%5CGPT-SoVITS-v3lora-20250228%5CGPT_SoVITS%5CBigVGAN%5Cdemo%5Cexamples%5Cqueen_24k.wav&prompt_text=hello&prompt_language=en HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54789 - "GET /?text=%E3%82%88%E3%82%8D%E3%81%97%E3%81%8F%E3%81%8A%E9%A1%98%E3%81%84%E3%81%97%E3%81%BE%E3%81%99%E3%82%8F%EF%BC%81&text_language=ja HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53494 - "GET /change_refer?refer_wav_path=C%3A%5Cprogram1%5Cjyansou%5Cjansou-app%5CGPT-SoVITS-v3lora-20250228%5CGPT_SoVITS%5CBigVGAN%5Cdemo%5Cexamples%5Cqueen_24k.wav&prompt_text=hello&prompt_language=en HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53495 - "GET /?text=%E3%82%88%E3%82%8D%E3%81%97%E3%81%8F%E3%81%AA%E3%80%81%E4%BB%8A%E6%97%A5%E3%81%AF%E8%8D%92%E3%82%8C%E3%82%8B%E3%81%9C%E3%80%82&text_language=ja HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53494 - "GET /change_refer?refer_wav_path=C%3A%5Cprogram1%5Cjyansou%5Cjansou-app%5CGPT-SoVITS-v3lora-20250228%5CGPT_SoVITS%5CBigVGAN%5Cdemo%5Cexamples%5Cqueen_24k.wav&prompt_text=hello&prompt_language=en HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49671 - "GET /?text=%E3%82%88%E3%82%8D%E3%81%97%E3%81%8F%E3%83%BC%E3%80%82%E6%B0%97%E6%A5%BD%E3%81%AB%E3%82%84%E3%82%8D%E3%81%86%E3%80%82&text_language=ja HTTP/1.1" 200 OK
+T2S Decoding EOS [264 -> 276]
+T2S Decoding EOS [264 -> 276]
+INFO:     127.0.0.1:59395 - "GET /change_refer?refer_wav_path=C%3A%5Cprogram1%5Cjyansou%5Cjansou-app%5CGPT-SoVITS-v3lora-20250228%5CGPT_SoVITS%5CBigVGAN%5Cdemo%5Cexamples%5Cqueen_24k.wav&prompt_text=hello&prompt_language=en HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54789 - "GET /?text=%E3%82%88%E3%82%8D%E3%81%97%E3%81%8F%E3%81%8A%E9%A1%98%E3%81%84%E3%81%97%E3%81%BE%E3%81%99%E3%82%8F%EF%BC%81&text_language=ja HTTP/1.1" 200 OK
+T2S Decoding EOS [264 -> 290]
+INFO:     127.0.0.1:64855 - "GET /change_refer?refer_wav_path=C%3A%5Cprogram1%5Cjyansou%5Cjansou-app%5CGPT-SoVITS-v3lora-20250228%5CGPT_SoVITS%5CBigVGAN%5Cdemo%5Cexamples%5Cqueen_24k.wav&prompt_text=hello&prompt_language=en HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64856 - "GET /?text=%E3%82%88%E3%82%8D%E3%81%97%E3%81%8F%E3%83%BC%E3%80%82%E6%B0%97%E6%A5%BD%E3%81%AB%E3%82%84%E3%82%8D%E3%81%86%E3%80%82&text_language=ja HTTP/1.1" 200 OK
+T2S Decoding EOS [264 -> 276]
+INFO:     127.0.0.1:64855 - "GET /change_refer?refer_wav_path=C%3A%5Cprogram1%5Cjyansou%5Cjansou-app%5CGPT-SoVITS-v3lora-20250228%5CGPT_SoVITS%5CBigVGAN%5Cdemo%5Cexamples%5Cqueen_24k.wav&prompt_text=hello&prompt_language=en HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54789 - "GET /?text=%E3%82%88%E3%82%8D%E3%81%97%E3%81%8F%E3%81%8A%E9%A1%98%E3%81%84%E3%81%97%E3%81%BE%E3%81%99%E3%82%8F%EF%BC%81&text_language=ja HTTP/1.1" 200 OK
+T2S Decoding EOS [264 -> 276]
+INFO:     127.0.0.1:52175 - "GET /change_refer?refer_wav_path=C%3A%5Cprogram1%5Cjyansou%5Cjansou-app%5CGPT-SoVITS-v3lora-20250228%5CGPT_SoVITS%5CBigVGAN%5Cdemo%5Cexamples%5Cqueen_24k.wav&prompt_text=hello&prompt_language=en HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64856 - "GET /?text=%E3%82%88%E3%82%8D%E3%81%97%E3%81%8F%E3%83%BC%E3%80%82%E6%B0%97%E6%A5%BD%E3%81%AB%E3%82%84%E3%82%8D%E3%81%86%E3%80%82&text_language=ja HTTP/1.1" 200 OK
+T2S Decoding EOS [264 -> 276]
+T2S Decoding EOS [264 -> 276]
+INFO:     127.0.0.1:57838 - "GET /change_refer?refer_wav_path=C%3A%5Cprogram1%5Cjyansou%5Cjansou-app%5CGPT-SoVITS-v3lora-20250228%5CGPT_SoVITS%5CBigVGAN%5Cdemo%5Cexamples%5Cqueen_24k.wav&prompt_text=hello&prompt_language=en HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57839 - "GET /?text=%E3%82%88%E3%82%8D%E3%81%97%E3%81%8F%E3%83%BC%E3%80%82%E6%B0%97%E6%A5%BD%E3%81%AB%E3%82%84%E3%82%8D%E3%81%86%E3%80%82&text_language=ja HTTP/1.1" 200 OK
