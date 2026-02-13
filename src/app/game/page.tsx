@@ -295,6 +295,7 @@ export default function GamePage() {
   const [scoreFlash, setScoreFlash] = useState(true);
   const [cpuActing, setCpuActing] = useState(false);
   const cpuTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const discardSoundRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
     void playCommentary("start", selectedChar);
@@ -309,6 +310,28 @@ export default function GamePage() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    const audio = new Audio("/sounds/notanomori_200812290000000026.wav");
+    audio.preload = "auto";
+    discardSoundRef.current = audio;
+
+    return () => {
+      discardSoundRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!state.lastDiscard) return;
+
+    const audio = discardSoundRef.current;
+    if (!audio) return;
+
+    audio.currentTime = 0;
+    void audio.play().catch(() => {
+      // Ignore browser autoplay rejections and continue gameplay.
+    });
+  }, [state.lastDiscard]);
 
   const scheduleCpuTurn = () => {
     if (cpuTimerRef.current !== null) {
