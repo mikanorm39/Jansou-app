@@ -515,14 +515,14 @@ export default function GamePage() {
   return (
     <main className="min-h-screen overflow-hidden bg-[radial-gradient(circle_at_50%_15%,#2f8f5b,#1f6f46_55%,#0f3f2a_85%,#08271b)] text-white">
       <section className="relative mx-auto h-screen w-full max-w-[1280px] p-3 md:p-6">
-        <div className="absolute left-1/2 top-10 w-[58%] -translate-x-1/2 scale-90 rounded-xl px-2 py-1 transition">
+        <div className="absolute left-1/2 top-8 w-[58%] -translate-x-1/2 rounded-xl px-2 py-1 transition">
           <div className="mb-2 text-center text-xs text-blue-100">
             南家 CPU {isSouthTurn ? "（打牌中）" : ""}
           </div>
-          <DiscardRiver tiles={state.players.south.discards} className={`mx-auto rounded-lg bg-black/30 p-2 transition ${isSouthTurn ? "ring-2 ring-amber-300/90 shadow-[0_0_24px_rgba(251,191,36,0.65)]" : ""}`} tileClass="h-8 w-6 rotate-180" />
+          <DiscardRiver tiles={state.players.south.discards} className={`mx-auto rounded-lg bg-black/30 p-2 transition ${isSouthTurn ? "ring-2 ring-amber-300/90 shadow-[0_0_24px_rgba(251,191,36,0.65)]" : ""}`} tileClass="h-9 w-7 rotate-180" />
         </div>
 
-        <div className="absolute left-2 top-1/2 -translate-y-1/2 rounded-xl px-2 py-2 transition">
+        <div className="absolute left-4 top-[calc(30%+78px)] -translate-y-1/2 rounded-xl px-2 py-2 transition">
           <div className="relative flex items-center justify-center rounded-xl px-2 py-2 transition">
             <div className="pointer-events-none absolute left-0 top-1/2 -translate-y-1/2 rotate-90 whitespace-nowrap text-left text-xs text-blue-100">
               西家 CPU {isWestTurn ? "（打牌中）" : ""}
@@ -533,7 +533,7 @@ export default function GamePage() {
           </div>
         </div>
 
-        <div className="absolute left-1/2 top-[43%] w-[360px] -translate-x-1/2 -translate-y-1/2 rounded-xl border border-cyan-400/40 bg-slate-950/70 p-3 shadow-2xl">
+        <div className="absolute right-4 top-4 w-[360px] rounded-xl border border-cyan-400/40 bg-slate-950/70 p-3 shadow-2xl">
           <div className="grid grid-cols-3 gap-3 text-center text-xs">
             <div>
               <p className="text-cyan-200">局</p>
@@ -560,7 +560,7 @@ export default function GamePage() {
           {state.kyotaku > 0 && <div className="mt-2 h-2 w-full animate-pulse rounded bg-rose-500" />}
         </div>
 
-        <div className="absolute left-1/2 top-[58%] -translate-x-1/2">
+        <div className="absolute left-1/2 top-[60%] -translate-x-1/2">
           <DiscardRiver tiles={me.discards} className="mx-auto rounded-lg bg-black/30 p-2" tileClass="h-9 w-7" />
         </div>
 
