@@ -15,7 +15,7 @@ import {
   concealedKanOptions,
   isWinningHand,
 } from "../../../lib/mahjong";
-import { playCommentary, playVoice } from "../../../lib/voiceService";
+import { playCommentary } from "../../../lib/voiceService";
 import { characters } from "../../../data/characters";
 
 type MeldType = "pon" | "chi" | "kan";
@@ -294,7 +294,9 @@ export default function GamePage() {
   const [state, setState] = useState<GameState>(initial);
   const [scoreFlash, setScoreFlash] = useState(true);
   const [cpuActing, setCpuActing] = useState(false);
-  const cpuTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const cpuTimerRef = useRef<number | null>(null);
+  const hurryTimerRef = useRef<number | null>(null);
+  const playedWinnerRef = useRef<string | null>(null);
   const discardSoundRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
@@ -308,8 +310,39 @@ export default function GamePage() {
       if (cpuTimerRef.current !== null) {
         window.clearTimeout(cpuTimerRef.current);
       }
+      if (hurryTimerRef.current !== null) {
+        window.clearInterval(hurryTimerRef.current);
+      }
     };
   }, []);
+
+  useEffect(() => {
+    const isPlayerThinking =
+      state.turn === "east" && !state.prompt && !state.winner && !state.drawReason;
+
+    if (!isPlayerThinking) {
+      if (hurryTimerRef.current !== null) {
+        window.clearInterval(hurryTimerRef.current);
+        hurryTimerRef.current = null;
+      }
+      return;
+    }
+
+    if (hurryTimerRef.current !== null) {
+      window.clearInterval(hurryTimerRef.current);
+    }
+
+    hurryTimerRef.current = window.setInterval(() => {
+      void playCommentary("turn_hurry", selectedChar);
+    }, 10000);
+
+    return () => {
+      if (hurryTimerRef.current !== null) {
+        window.clearInterval(hurryTimerRef.current);
+        hurryTimerRef.current = null;
+      }
+    };
+  }, [state.turn, state.prompt, state.winner, state.drawReason, selectedChar]);
 
   useEffect(() => {
     const audio = new Audio("/sounds/notanomori_200812290000000026.wav");
@@ -351,6 +384,21 @@ export default function GamePage() {
     scheduleCpuTurn();
   }, [state.turn, state.prompt, state.winner, state.drawReason, cpuActing]);
 
+  useEffect(() => {
+    if (!state.winner) {
+      playedWinnerRef.current = null;
+      return;
+    }
+
+    const winnerKey = `${state.winner.winner}-${state.winner.byTsumo ? "tsumo" : "ron"}-${state.winner.pointLabel}`;
+    if (playedWinnerRef.current === winnerKey) return;
+    playedWinnerRef.current = winnerKey;
+
+    if (state.winner.winner !== "east") {
+      void playCommentary("lose", selectedChar);
+    }
+  }, [state.winner, selectedChar]);
+
   const me = state.players.east;
   const currentCharacter = characters.find((c) => c.id === selectedChar);
   const isSouthTurn = state.turn === "south" && !state.prompt && !state.winner && !state.drawReason;
@@ -366,6 +414,7 @@ export default function GamePage() {
     const draft = cloneState(state);
     const tile = draft.players.east.hand[index];
     if (!tile) return;
+    const isRepeatDiscard = draft.players.east.discards.includes(tile);
 
     draft.players.east.hand.splice(index, 1);
     draft.players.east.discards.push(tile);
@@ -374,12 +423,15 @@ export default function GamePage() {
     const ronWinner = findCpuRonWinner(draft, tile);
     if (ronWinner) {
       setState(settleWin(draft, ronWinner, false, "east", [...draft.players[ronWinner].hand, tile]));
-      await playCommentary("win", selectedChar);
       return;
     }
 
     draft.turn = "south";
     setState(draft);
+
+    if (isRepeatDiscard) {
+      await playCommentary("repeat_discard", selectedChar);
+    }
   };
 
   const onReach = async () => {
@@ -402,7 +454,7 @@ export default function GamePage() {
       return settleWin(next, "east", true, undefined, next.players.east.hand);
     });
 
-    await playCommentary("win", selectedChar);
+    await playCommentary("tsumo", selectedChar);
     await playCommentary("yaku", selectedChar);
   };
 
@@ -419,7 +471,7 @@ export default function GamePage() {
       return settleWin(next, "east", false, prompt.from, winningTiles);
     });
 
-    await playCommentary("win", selectedChar);
+    await playCommentary("ron", selectedChar);
     await playCommentary("yaku", selectedChar);
   };
 
@@ -459,7 +511,7 @@ export default function GamePage() {
       return next;
     });
 
-    await playVoice("カンですわ！", selectedChar);
+    await playCommentary("kan", selectedChar);
   };
 
   const onChi = async (chiSet: TileType[]) => {
@@ -480,7 +532,7 @@ export default function GamePage() {
       return next;
     });
 
-    await playVoice("チー、いただきますわ。", selectedChar);
+    await playCommentary("chi", selectedChar);
   };
 
   const onConcealedKan = async (tile: TileType) => {
@@ -494,7 +546,7 @@ export default function GamePage() {
       return next;
     });
 
-    await playVoice("暗槓ですわ。", selectedChar);
+    await playCommentary("kan", selectedChar);
   };
 
   const onSkip = () => {
@@ -655,7 +707,7 @@ export default function GamePage() {
                   setState(reset);
                   setScoreFlash(true);
                   window.setTimeout(() => setScoreFlash(false), 1100);
-                  void playVoice("よろしくお願いしますわ！", selectedChar);
+                  void playCommentary("start", selectedChar);
                 }}
                 className="mt-5 rounded-md bg-cyan-500 px-4 py-2 font-bold text-black hover:bg-cyan-400"
               >

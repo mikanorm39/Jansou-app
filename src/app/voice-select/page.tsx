@@ -2,7 +2,6 @@
 
 import { useRouter } from "next/navigation";
 import { characters } from "../../../data/characters";
-import { TrainingInterface } from "../../components/training/TrainingInterface";
 import { playCommentary } from "../../../lib/voiceService";
 
 export default function VoiceSelectPage() {
@@ -23,7 +22,7 @@ export default function VoiceSelectPage() {
               <div className="mt-4 flex gap-2">
                 <button
                   type="button"
-                  onClick={() => void playCommentary("start", character.id)}
+                  onClick={() => void playCommentary("preview", character.id)}
                   className="rounded-md bg-slate-200 px-3 py-2 text-sm font-bold text-black hover:bg-white"
                 >
                   試聴
@@ -40,9 +39,6 @@ export default function VoiceSelectPage() {
           ))}
         </div>
 
-        <div className="mt-8">
-          <TrainingInterface />
-        </div>
       </section>
     </main>
   );

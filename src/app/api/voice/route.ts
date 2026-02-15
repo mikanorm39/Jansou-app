@@ -1,94 +1,89 @@
 import { NextRequest, NextResponse } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
-import { characters } from "../../../../data/characters";
 
-const GPT_SOVITS_ENDPOINT = "http://127.0.0.1:9880";
-const SAMPLE_REFER_WAV = "GPT-SoVITS-v3lora-20250228/GPT_SoVITS/BigVGAN/demo/examples/queen_24k.wav";
+const VOICE_ROOT_DIR = path.join(process.cwd(), "public", "user-voices");
+const REPEAT_DISCARD_QUOTES = ["なんでまた", "君はいらないのだ"];
 
-function resolveLocalPath(p: string): string {
-  return path.isAbsolute(p) ? p : path.join(process.cwd(), p);
+const EVENT_KEYWORDS: Record<string, string[]> = {
+  preview: ["preview", "自己紹介", "はじめまして", "です。"],
+  start: ["start", "開始", "よろしく"],
+  reach: ["reach", "リーチ"],
+  pon: ["pon", "ポン"],
+  chi: ["chi", "チー"],
+  kan: ["kan", "カン", "槓"],
+  win: ["win", "勝っ", "やった", "ロン", "ツモ", "あがり", "上がり"],
+  ron: ["ron", "ロン"],
+  tsumo: ["tsumo", "ツモ", "勝っ", "やった"],
+  lose: ["lose", "負け"],
+  draw: ["draw", "流局"],
+  yaku: ["yaku", "役"],
+  turn_hurry: ["hurry", "考える", "急い", "早く"],
+};
+
+function randomPick<T>(items: T[]): T | null {
+  if (items.length === 0) return null;
+  return items[Math.floor(Math.random() * items.length)];
+}
+
+function listVoiceFiles(character: string): { files: string[]; basePath: string } {
+  const characterDir = path.join(VOICE_ROOT_DIR, character);
+  const baseDir = fs.existsSync(characterDir) ? characterDir : VOICE_ROOT_DIR;
+
+  const files = fs
+    .readdirSync(baseDir, { withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => entry.name);
+
+  const basePath = baseDir === characterDir ? `/user-voices/${character}` : "/user-voices";
+  return { files, basePath };
+}
+
+function pickClip(fileNames: string[], event: string): string | null {
+  const lowered = fileNames.map((name) => ({ name, lower: name.toLowerCase() }));
+
+  if (event === "repeat_discard") {
+    const candidates = lowered
+      .filter((entry) => REPEAT_DISCARD_QUOTES.some((keyword) => entry.name.includes(keyword)))
+      .map((entry) => entry.name);
+    return randomPick(candidates);
+  }
+
+  const keywords = EVENT_KEYWORDS[event];
+  if (!keywords) return null;
+
+  const candidates = lowered
+    .filter((entry) =>
+      keywords.some((keyword) => entry.lower.includes(keyword.toLowerCase())),
+    )
+    .map((entry) => entry.name);
+
+  return randomPick(candidates);
 }
 
 export async function GET(request: NextRequest) {
-  const text = request.nextUrl.searchParams.get("text");
   const character = request.nextUrl.searchParams.get("character");
+  const event = request.nextUrl.searchParams.get("event");
 
-  if (!text || !character) {
+  if (!character || !event) {
     return NextResponse.json(
-      { error: "Missing required query params: text, character" },
+      { error: "Missing required query params: character, event" },
       { status: 400 },
     );
   }
 
-  try {
-    // Ensure default reference voice exists before synthesis.
-    const referPathRaw = process.env.GPT_SOVITS_REFER_WAV_PATH ?? SAMPLE_REFER_WAV;
-    const referPath = resolveLocalPath(referPathRaw);
-    if (!fs.existsSync(referPath)) {
-      return NextResponse.json(
-        {
-          error: "Reference wav not found",
-          detail: `Set GPT_SOVITS_REFER_WAV_PATH or place sample at: ${referPath}`,
-        },
-        { status: 500 },
-      );
-    }
-
-    const referParams = new URLSearchParams({
-      refer_wav_path: referPath,
-      prompt_text: process.env.GPT_SOVITS_REFER_TEXT ?? "hello",
-      prompt_language: process.env.GPT_SOVITS_REFER_LANG ?? "en",
-    });
-    const referResp = await fetch(`${GPT_SOVITS_ENDPOINT}/change_refer?${referParams.toString()}`);
-    if (!referResp.ok) {
-      const body = await referResp.text();
-      return NextResponse.json(
-        { error: `change_refer failed: ${referResp.status}`, detail: body },
-        { status: 502 },
-      );
-    }
-
-    const selected = characters.find((c) => c.id === character);
-    if (selected?.model.gptModelPath && selected.model.sovitsModelPath) {
-      const gptAbs = resolveLocalPath(selected.model.gptModelPath);
-      const sovitsAbs = resolveLocalPath(selected.model.sovitsModelPath);
-      if (fs.existsSync(gptAbs) && fs.existsSync(sovitsAbs)) {
-        const modelParams = new URLSearchParams({
-          gpt_model_path: gptAbs,
-          sovits_model_path: sovitsAbs,
-        });
-        await fetch(`${GPT_SOVITS_ENDPOINT}/set_model?${modelParams.toString()}`);
-      }
-    }
-
-    const params = new URLSearchParams({
-      text,
-      text_language: "ja",
-    });
-
-    const ttsResponse = await fetch(`${GPT_SOVITS_ENDPOINT}/?${params.toString()}`, {
-      method: "GET",
-    });
-
-    if (!ttsResponse.ok) {
-      const body = await ttsResponse.text();
-      return NextResponse.json(
-        { error: `TTS failed: ${ttsResponse.status}`, detail: body },
-        { status: 502 },
-      );
-    }
-
-    const arrayBuffer = await ttsResponse.arrayBuffer();
-    return new NextResponse(arrayBuffer, {
-      status: 200,
-      headers: {
-        "Content-Type": ttsResponse.headers.get("content-type") ?? "audio/wav",
-        "Cache-Control": "no-store",
-      },
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown server error";
-    return NextResponse.json({ error: message }, { status: 500 });
+  if (!fs.existsSync(VOICE_ROOT_DIR)) {
+    return NextResponse.json(
+      { error: `Voice directory not found: ${VOICE_ROOT_DIR}` },
+      { status: 404 },
+    );
   }
+
+  const { files, basePath } = listVoiceFiles(character);
+  const clip = pickClip(files, event);
+  if (!clip) return NextResponse.json({ url: null });
+
+  return NextResponse.json({
+    url: `${basePath}/${encodeURIComponent(clip)}`,
+  });
 }
