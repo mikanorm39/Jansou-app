@@ -494,6 +494,8 @@ export default function GamePage() {
   const cpuTimerRef = useRef<number | null>(null);
   const hurryTimerRef = useRef<number | null>(null);
   const playedWinnerRef = useRef<string | null>(null);
+  const playedDrawRef = useRef<string | null>(null);
+  const playedGameOverRef = useRef<string | null>(null);
   const discardSoundRef = useRef<HTMLAudioElement | null>(null);
   const bgmRef = useRef<HTMLAudioElement | null>(null);
   const currentBgmTrackRef = useRef<string | null>(null);
@@ -671,6 +673,33 @@ export default function GamePage() {
     }
   }, [state.winner, selectedChar]);
 
+  useEffect(() => {
+    if (!state.drawReason) {
+      playedDrawRef.current = null;
+      return;
+    }
+
+    const drawKey = `${state.kyoku}-${state.drawReason}`;
+    if (playedDrawRef.current === drawKey) return;
+    playedDrawRef.current = drawKey;
+    void playCommentary("draw", selectedChar);
+  }, [state.drawReason, state.kyoku, selectedChar]);
+
+  useEffect(() => {
+    if (!state.gameOver) {
+      playedGameOverRef.current = null;
+      return;
+    }
+
+    const gameOverKey = `${state.gameOver.reason}-${state.gameOver.rankings.map((entry) => `${entry.wind}:${entry.score}`).join(",")}`;
+    if (playedGameOverRef.current === gameOverKey) return;
+    playedGameOverRef.current = gameOverKey;
+
+    if (state.gameOver.rankings[0]?.wind === state.userWind) {
+      void playCommentary("win", selectedChar);
+    }
+  }, [state.gameOver, state.userWind, selectedChar]);
+
   const me = state.players[state.userWind];
   const meFullHand = fullHand(me);
   const currentCharacter = characters.find((c) => c.id === selectedChar);
@@ -711,7 +740,8 @@ export default function GamePage() {
     const player = draft.players[draft.userWind];
     const tile = fromDrawn ? player.drawnTile : player.hand[index];
     if (!tile) return;
-    const isRepeatDiscard = draft.players[draft.userWind].discards.includes(tile);
+    const previousDiscard = draft.players[draft.userWind].discards.at(-1) ?? null;
+    const isRepeatDiscard = previousDiscard === tile;
 
     if (fromDrawn) {
       player.drawnTile = null;
