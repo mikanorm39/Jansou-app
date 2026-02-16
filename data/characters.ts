@@ -11,8 +11,8 @@
 export const characters: VoiceCharacter[] = [
   {
     id: "ojousama",
-    name: "お嬢様",
-    description: "上品で高圧的な実況スタイル",
+    name: "ずんだもん",
+    description: "ずんだもんボイスで実況する",
     model: {
       gptModelPath: "models/ojousama/gpt.ckpt",
       sovitsModelPath: "models/ojousama/sovits.pth",

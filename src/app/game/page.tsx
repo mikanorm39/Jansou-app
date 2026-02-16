@@ -13,9 +13,10 @@ import {
   chiOptions,
   chooseCpuDiscard,
   concealedKanOptions,
+  evaluateHandTiles,
   isWinningHand,
 } from "../../../lib/mahjong";
-import { playCommentary, playVoice } from "../../../lib/voiceService";
+import { playCommentary } from "../../../lib/voiceService";
 import { characters } from "../../../data/characters";
 
 type MeldType = "pon" | "chi" | "kan";
@@ -23,10 +24,13 @@ type MeldType = "pon" | "chi" | "kan";
 type MeldState = {
   type: MeldType;
   tiles: TileType[];
+  calledFrom?: PlayerWind;
+  calledIndex?: number;
 };
 
 type PlayerState = {
   hand: TileType[];
+  drawnTile: TileType | null;
   discards: TileType[];
   score: number;
   isReach: boolean;
@@ -49,11 +53,26 @@ type WinOverlay = {
   yaku: string[];
 };
 
+type RankingEntry = {
+  wind: PlayerWind;
+  score: number;
+  owner: string;
+  seatLabel: string;
+};
+
+type GameOverOverlay = {
+  reason: string;
+  rankings: RankingEntry[];
+};
+
 type GameState = {
   players: Record<PlayerWind, PlayerState>;
   wall: TileType[];
   turn: PlayerWind;
   doraIndicator: TileType;
+  roundWind: PlayerWind;
+  userWind: PlayerWind;
+  kyokuNumber: number;
   kyoku: string;
   honba: number;
   kyotaku: number;
@@ -61,6 +80,7 @@ type GameState = {
   prompt: ActionPrompt | null;
   winner: WinOverlay | null;
   drawReason: string | null;
+  gameOver: GameOverOverlay | null;
 };
 
 const WINDS: PlayerWind[] = ["east", "south", "west"];
@@ -70,6 +90,36 @@ function nextWind(wind: PlayerWind): PlayerWind {
   if (wind === "east") return "south";
   if (wind === "south") return "west";
   return "east";
+}
+
+function prevWind(wind: PlayerWind): PlayerWind {
+  if (wind === "east") return "west";
+  if (wind === "south") return "east";
+  return "south";
+}
+
+function roundWindLabel(wind: PlayerWind): string {
+  if (wind === "east") return "東";
+  if (wind === "south") return "南";
+  return "西";
+}
+
+function seatWindLabel(wind: PlayerWind): string {
+  if (wind === "east") return "東家";
+  if (wind === "south") return "南家";
+  return "西家";
+}
+
+function formatKyoku(roundWind: PlayerWind, kyokuNumber: number): string {
+  return `${roundWindLabel(roundWind)}${kyokuNumber}局`;
+}
+
+function rotateScores(scores: Record<PlayerWind, number>): Record<PlayerWind, number> {
+  return {
+    east: scores.west,
+    south: scores.east,
+    west: scores.south,
+  };
 }
 
 function getInitialCharacter(): string {
@@ -86,18 +136,21 @@ function cloneState(state: GameState): GameState {
       east: {
         ...state.players.east,
         hand: [...state.players.east.hand],
+        drawnTile: state.players.east.drawnTile,
         discards: [...state.players.east.discards],
         calledMelds: state.players.east.calledMelds.map((m) => ({ ...m, tiles: [...m.tiles] })),
       },
       south: {
         ...state.players.south,
         hand: [...state.players.south.hand],
+        drawnTile: state.players.south.drawnTile,
         discards: [...state.players.south.discards],
         calledMelds: state.players.south.calledMelds.map((m) => ({ ...m, tiles: [...m.tiles] })),
       },
       west: {
         ...state.players.west,
         hand: [...state.players.west.hand],
+        drawnTile: state.players.west.drawnTile,
         discards: [...state.players.west.discards],
         calledMelds: state.players.west.calledMelds.map((m) => ({ ...m, tiles: [...m.tiles] })),
       },
@@ -107,6 +160,7 @@ function cloneState(state: GameState): GameState {
 
 function drawTileIfNeeded(state: GameState, wind: PlayerWind): boolean {
   const player = state.players[wind];
+  if (player.drawnTile) return true;
   if (player.hand.length % 3 !== 1) return true;
 
   const draw = state.wall.shift();
@@ -115,8 +169,25 @@ function drawTileIfNeeded(state: GameState, wind: PlayerWind): boolean {
     return false;
   }
 
-  player.hand = sortTiles([...player.hand, draw]);
+  player.drawnTile = draw;
   return true;
+}
+
+function fullHand(player: PlayerState): TileType[] {
+  return player.drawnTile ? sortTiles([...player.hand, player.drawnTile]) : player.hand;
+}
+
+function removeOneTile(hand: TileType[], target: TileType): boolean {
+  const idx = hand.indexOf(target);
+  if (idx < 0) return false;
+  hand.splice(idx, 1);
+  return true;
+}
+
+function consumeDrawnTile(player: PlayerState) {
+  if (!player.drawnTile) return;
+  player.hand = sortTiles([...player.hand, player.drawnTile]);
+  player.drawnTile = null;
 }
 
 function settleWin(
@@ -136,12 +207,31 @@ function settleWin(
       doraIndicator: state.doraIndicator,
       isMenzen: state.players[winner].calledMelds.length === 0,
       seatWind: winner,
-      roundWind: "east",
+      roundWind: state.roundWind,
     },
   });
 
+  const deltas = { ...result.deltas };
+  if (state.honba > 0) {
+    const bonus = state.honba * 100;
+    if (byTsumo) {
+      for (const wind of WINDS) {
+        if (wind === winner) continue;
+        deltas[wind] -= bonus;
+        deltas[winner] += bonus;
+      }
+    } else if (loser) {
+      deltas[loser] -= bonus * 3;
+      deltas[winner] += bonus * 3;
+    }
+  }
+
+  if (state.kyotaku > 0) {
+    deltas[winner] += state.kyotaku * 1000;
+  }
+
   for (const wind of WINDS) {
-    state.players[wind].score += result.deltas[wind];
+    state.players[wind].score += deltas[wind];
   }
 
   state.winner = {
@@ -155,9 +245,10 @@ function settleWin(
 }
 
 function findCpuRonWinner(state: GameState, discardedTile: TileType): PlayerWind | null {
-  for (const wind of ["south", "west"] as const) {
+  for (const wind of WINDS) {
+    if (wind === state.userWind) continue;
     const cpu = state.players[wind];
-    if (isWinningHand([...cpu.hand, discardedTile])) {
+    if (isWinningHand([...fullHand(cpu), discardedTile])) {
       return wind;
     }
   }
@@ -167,7 +258,7 @@ function findCpuRonWinner(state: GameState, discardedTile: TileType): PlayerWind
 function resolveCpuTurn(state: GameState): GameState {
   const next = cloneState(state);
 
-  if (next.turn === "east" || next.prompt || next.winner || next.drawReason) {
+  if (next.turn === next.userWind || next.prompt || next.winner || next.drawReason) {
     return next;
   }
 
@@ -175,8 +266,8 @@ function resolveCpuTurn(state: GameState): GameState {
   if (!drawTileIfNeeded(next, wind)) return next;
 
   const cpu = next.players[wind];
-  if (isWinningHand(cpu.hand)) {
-    return settleWin(next, wind, true, undefined, cpu.hand);
+  if (isWinningHand(fullHand(cpu))) {
+    return settleWin(next, wind, true, undefined, fullHand(cpu));
   }
 
   const threateningDiscards = new Set<TileType>();
@@ -189,65 +280,113 @@ function resolveCpuTurn(state: GameState): GameState {
     }
   }
 
-  const discardIndex = chooseCpuDiscard(cpu.hand, threateningDiscards);
-  const tile = cpu.hand[discardIndex];
-  cpu.hand.splice(discardIndex, 1);
+  const cpuFull = fullHand(cpu);
+  const discardIndex = chooseCpuDiscard(cpuFull, threateningDiscards);
+  const tile = cpuFull[discardIndex];
+  if (cpu.drawnTile && cpu.drawnTile === tile) {
+    cpu.drawnTile = null;
+  } else {
+    removeOneTile(cpu.hand, tile);
+    consumeDrawnTile(cpu);
+  }
   cpu.discards.push(tile);
   next.lastDiscard = { from: wind, tile };
 
-  const user = next.players.east;
+  const user = next.players[next.userWind];
   const ron = isWinningHand([...user.hand, tile]);
   const pon = canPon(user.hand, tile);
   const kan = canKan(user.hand, tile);
-  const canChiFromThisPlayer = wind === "west";
+  const canChiFromThisPlayer = wind === prevWind(next.userWind);
   const chi = canChiFromThisPlayer ? chiOptions(user.hand, tile) : [];
 
   if (ron || pon || kan || chi.length > 0) {
     next.prompt = { from: wind, tile, canPon: pon, canRon: ron, canKan: kan, chiOptions: chi };
-    next.turn = "east";
+    next.turn = next.userWind;
     return next;
   }
 
   next.turn = nextWind(wind);
-  if (next.turn === "east" && !next.prompt && !next.winner && !next.drawReason) {
-    drawTileIfNeeded(next, "east");
+  if (next.turn === next.userWind && !next.prompt && !next.winner && !next.drawReason) {
+    drawTileIfNeeded(next, next.userWind);
   }
 
   return next;
 }
 
 function turnLabel(wind: PlayerWind): string {
-  if (wind === "east") return "東家";
-  if (wind === "south") return "南家";
-  return "西家";
+  return seatWindLabel(wind);
 }
 
-function turnOwnerLabel(wind: PlayerWind): string {
-  if (wind === "east") return "あなた";
-  return "CPU";
+function turnOwnerLabel(wind: PlayerWind, userWind: PlayerWind): string {
+  if (wind === userWind) return "あなた";
+  const order: PlayerWind[] = ["east", "south", "west"];
+  const userIndex = order.indexOf(userWind);
+  const windIndex = order.indexOf(wind);
+  const cpuIndex = (windIndex - userIndex + order.length) % order.length;
+  return cpuIndex === 1 ? "CPU1" : "CPU2";
 }
 
-function createInitialState(): GameState {
+function buildRankings(state: GameState): RankingEntry[] {
+  return [...WINDS]
+    .map((wind) => ({
+      wind,
+      score: state.players[wind].score,
+      owner: turnOwnerLabel(wind, state.userWind),
+      seatLabel: seatWindLabel(wind),
+    }))
+    .sort((a, b) => b.score - a.score || WINDS.indexOf(a.wind) - WINDS.indexOf(b.wind));
+}
+
+function shouldEndGame(state: GameState): { end: boolean; reason: string } {
+  const anyNegative = WINDS.some((wind) => state.players[wind].score < 0);
+  if (anyNegative) {
+    return { end: true, reason: "持ち点がマイナスになりました" };
+  }
+
+  const isEastRound3 = state.roundWind === "east" && state.kyokuNumber === 3;
+  if (isEastRound3) {
+    return { end: true, reason: "東3局終了" };
+  }
+
+  return { end: false, reason: "" };
+}
+
+function createInitialState(options?: {
+  roundWind?: PlayerWind;
+  scores?: Record<PlayerWind, number>;
+  honba?: number;
+  kyotaku?: number;
+  userWind?: PlayerWind;
+  kyokuNumber?: number;
+}): GameState {
+  const roundWind = options?.roundWind ?? "east";
+  const scores = options?.scores ?? { east: 35000, south: 35000, west: 35000 };
+  const userWind = options?.userWind ?? "east";
+  const kyokuNumber = options?.kyokuNumber ?? 1;
   const dealt = dealInitialHands();
   const wall = [...dealt.wall];
   const doraIndicator = wall[0] ?? "z1";
 
   const state: GameState = {
     players: {
-      east: { hand: dealt.players.east, discards: [], score: 35000, isReach: false, calledMelds: [] },
-      south: { hand: dealt.players.south, discards: [], score: 35000, isReach: false, calledMelds: [] },
-      west: { hand: dealt.players.west, discards: [], score: 35000, isReach: false, calledMelds: [] },
+      east: { hand: dealt.players.east, drawnTile: null, discards: [], score: scores.east, isReach: false, calledMelds: [] },
+      south: { hand: dealt.players.south, drawnTile: null, discards: [], score: scores.south, isReach: false, calledMelds: [] },
+      west: { hand: dealt.players.west, drawnTile: null, discards: [], score: scores.west, isReach: false, calledMelds: [] },
     },
     wall,
     turn: "east",
     doraIndicator,
-    kyoku: "東1局",
-    honba: 0,
-    kyotaku: 0,
+    roundWind,
+    userWind,
+    kyokuNumber,
+    kyoku: formatKyoku(roundWind, kyokuNumber),
+    honba: options?.honba ?? 0,
+    kyotaku: options?.kyotaku ?? 0,
     lastDiscard: null,
     prompt: null,
     winner: null,
     drawReason: null,
+    gameOver: null,
   };
 
   drawTileIfNeeded(state, "east");
@@ -288,13 +427,73 @@ function DiscardRiver({ tiles, className, tileClass }: { tiles: TileType[]; clas
   );
 }
 
+function isTenpai(player: PlayerState): boolean {
+  const hand = fullHand(player);
+  const shanten = calculateShanten(hand);
+  return shanten !== null && shanten <= 0;
+}
+
+function buildDrawYakuSummary(state: GameState): Array<{ wind: PlayerWind; yaku: string[] }> {
+  return WINDS.map((wind) => {
+    const player = state.players[wind];
+    const tiles = fullHand(player);
+    if (!isWinningHand(tiles)) {
+      return { wind, yaku: ["未和了"] };
+    }
+
+    const result = evaluateHandTiles(tiles, {
+      isReach: player.isReach,
+      doraIndicator: state.doraIndicator,
+      isMenzen: player.calledMelds.length === 0,
+      byTsumo: false,
+      seatWind: wind,
+      roundWind: state.roundWind,
+    });
+
+    return { wind, yaku: result.yaku.length > 0 ? result.yaku : ["役なし"] };
+  });
+}
+
+function dealerHasYaku(state: GameState): boolean {
+  const dealer = state.players.east;
+  const tiles = fullHand(dealer);
+  if (!isWinningHand(tiles)) return false;
+  const result = evaluateHandTiles(tiles, {
+    isReach: dealer.isReach,
+    doraIndicator: state.doraIndicator,
+    isMenzen: dealer.calledMelds.length === 0,
+    byTsumo: false,
+    seatWind: "east",
+    roundWind: state.roundWind,
+  });
+  return result.yaku.some((name) => name !== "役なし");
+}
+
+function dealerHasMenzenTsumo(state: GameState): boolean {
+  const dealer = state.players.east;
+  if (dealer.calledMelds.length > 0) return false;
+  const tiles = fullHand(dealer);
+  if (!isWinningHand(tiles)) return false;
+  const result = evaluateHandTiles(tiles, {
+    isReach: dealer.isReach,
+    doraIndicator: state.doraIndicator,
+    isMenzen: true,
+    byTsumo: true,
+    seatWind: "east",
+    roundWind: state.roundWind,
+  });
+  return result.yaku.includes("門前ツモ");
+}
+
 export default function GamePage() {
   const [selectedChar] = useState(getInitialCharacter);
   const initial = useMemo(() => createInitialState(), []);
   const [state, setState] = useState<GameState>(initial);
   const [scoreFlash, setScoreFlash] = useState(true);
   const [cpuActing, setCpuActing] = useState(false);
-  const cpuTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const cpuTimerRef = useRef<number | null>(null);
+  const hurryTimerRef = useRef<number | null>(null);
+  const playedWinnerRef = useRef<string | null>(null);
   const discardSoundRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
@@ -308,8 +507,39 @@ export default function GamePage() {
       if (cpuTimerRef.current !== null) {
         window.clearTimeout(cpuTimerRef.current);
       }
+      if (hurryTimerRef.current !== null) {
+        window.clearInterval(hurryTimerRef.current);
+      }
     };
   }, []);
+
+  useEffect(() => {
+    const isPlayerThinking =
+      !state.gameOver && state.turn === state.userWind && !state.prompt && !state.winner && !state.drawReason;
+
+    if (!isPlayerThinking) {
+      if (hurryTimerRef.current !== null) {
+        window.clearInterval(hurryTimerRef.current);
+        hurryTimerRef.current = null;
+      }
+      return;
+    }
+
+    if (hurryTimerRef.current !== null) {
+      window.clearInterval(hurryTimerRef.current);
+    }
+
+    hurryTimerRef.current = window.setInterval(() => {
+      void playCommentary("turn_hurry", selectedChar);
+    }, 10000);
+
+    return () => {
+      if (hurryTimerRef.current !== null) {
+        window.clearInterval(hurryTimerRef.current);
+        hurryTimerRef.current = null;
+      }
+    };
+  }, [state.turn, state.prompt, state.winner, state.drawReason, selectedChar]);
 
   useEffect(() => {
     const audio = new Audio("/sounds/notanomori_200812290000000026.wav");
@@ -347,47 +577,75 @@ export default function GamePage() {
 
   useEffect(() => {
     if (cpuActing) return;
-    if (state.turn === "east" || state.prompt || state.winner || state.drawReason) return;
+    if (state.gameOver || state.turn === state.userWind || state.prompt || state.winner || state.drawReason) return;
     scheduleCpuTurn();
-  }, [state.turn, state.prompt, state.winner, state.drawReason, cpuActing]);
+  }, [state.turn, state.prompt, state.winner, state.drawReason, state.gameOver, cpuActing]);
 
-  const me = state.players.east;
-  const currentCharacter = characters.find((c) => c.id === selectedChar);
-  const isSouthTurn = state.turn === "south" && !state.prompt && !state.winner && !state.drawReason;
-  const isWestTurn = state.turn === "west" && !state.prompt && !state.winner && !state.drawReason;
-  const isEastTurn = state.turn === "east" && !state.prompt && !state.winner && !state.drawReason;
-  const canReach = !state.prompt && !state.winner && !state.drawReason && state.turn === "east" && me.calledMelds.length === 0 && canDeclareReach(me.hand, me.isReach);
-  const canTsumo = !state.prompt && !state.winner && !state.drawReason && state.turn === "east" && isWinningHand(me.hand);
-  const concealedKans = !state.prompt && !state.winner && !state.drawReason && state.turn === "east" ? concealedKanOptions(me.hand) : [];
-
-  const discardByUser = async (index: number) => {
-    if (state.turn !== "east" || state.prompt || state.winner || state.drawReason) return;
-
-    const draft = cloneState(state);
-    const tile = draft.players.east.hand[index];
-    if (!tile) return;
-
-    draft.players.east.hand.splice(index, 1);
-    draft.players.east.discards.push(tile);
-    draft.lastDiscard = { from: "east", tile };
-
-    const ronWinner = findCpuRonWinner(draft, tile);
-    if (ronWinner) {
-      setState(settleWin(draft, ronWinner, false, "east", [...draft.players[ronWinner].hand, tile]));
-      await playCommentary("win", selectedChar);
+  useEffect(() => {
+    if (!state.winner) {
+      playedWinnerRef.current = null;
       return;
     }
 
-    draft.turn = "south";
+    const winnerKey = `${state.winner.winner}-${state.winner.byTsumo ? "tsumo" : "ron"}-${state.winner.pointLabel}`;
+    if (playedWinnerRef.current === winnerKey) return;
+    playedWinnerRef.current = winnerKey;
+
+    if (state.winner.winner !== state.userWind) {
+      void playCommentary("lose", selectedChar);
+    }
+  }, [state.winner, selectedChar]);
+
+  const me = state.players[state.userWind];
+  const meFullHand = fullHand(me);
+  const currentCharacter = characters.find((c) => c.id === selectedChar);
+  const topWind = nextWind(state.userWind);
+  const leftWind = nextWind(topWind);
+  const isTopTurn = state.turn === topWind && !state.prompt && !state.winner && !state.drawReason;
+  const isLeftTurn = state.turn === leftWind && !state.prompt && !state.winner && !state.drawReason;
+  const isUserTurn = state.turn === state.userWind && !state.prompt && !state.winner && !state.drawReason;
+  const canReach = !state.prompt && !state.winner && !state.drawReason && state.turn === state.userWind && me.calledMelds.length === 0 && canDeclareReach(meFullHand, me.isReach);
+  const canTsumo = !state.prompt && !state.winner && !state.drawReason && state.turn === state.userWind && isWinningHand(meFullHand);
+  const concealedKans = !state.prompt && !state.winner && !state.drawReason && state.turn === state.userWind ? concealedKanOptions(meFullHand) : [];
+
+  const discardByUser = async (index: number, fromDrawn = false) => {
+    if (state.turn !== state.userWind || state.prompt || state.winner || state.drawReason) return;
+
+    const draft = cloneState(state);
+    const player = draft.players[draft.userWind];
+    const tile = fromDrawn ? player.drawnTile : player.hand[index];
+    if (!tile) return;
+    const isRepeatDiscard = draft.players[draft.userWind].discards.includes(tile);
+
+    if (fromDrawn) {
+      player.drawnTile = null;
+    } else {
+      player.hand.splice(index, 1);
+      consumeDrawnTile(player);
+    }
+    player.discards.push(tile);
+    draft.lastDiscard = { from: draft.userWind, tile };
+
+    const ronWinner = findCpuRonWinner(draft, tile);
+    if (ronWinner) {
+      setState(settleWin(draft, ronWinner, false, draft.userWind, [...draft.players[ronWinner].hand, tile]));
+      return;
+    }
+
+    draft.turn = nextWind(draft.userWind);
     setState(draft);
+
+    if (isRepeatDiscard) {
+      await playCommentary("repeat_discard", selectedChar);
+    }
   };
 
   const onReach = async () => {
     if (!canReach) return;
     setState((prev) => {
       const next = cloneState(prev);
-      next.players.east.isReach = true;
-      next.players.east.score -= 1000;
+      next.players[next.userWind].isReach = true;
+      next.players[next.userWind].score -= 1000;
       next.kyotaku += 1;
       return next;
     });
@@ -399,10 +657,10 @@ export default function GamePage() {
 
     setState((prev) => {
       const next = cloneState(prev);
-      return settleWin(next, "east", true, undefined, next.players.east.hand);
+      return settleWin(next, next.userWind, true, undefined, fullHand(next.players[next.userWind]));
     });
 
-    await playCommentary("win", selectedChar);
+    await playCommentary("tsumo", selectedChar);
     await playCommentary("yaku", selectedChar);
   };
 
@@ -414,12 +672,12 @@ export default function GamePage() {
       if (!prompt) return prev;
 
       const next = cloneState(prev);
-      const winningTiles = [...next.players.east.hand, prompt.tile];
+      const winningTiles = [...next.players[next.userWind].hand, prompt.tile];
       next.prompt = null;
-      return settleWin(next, "east", false, prompt.from, winningTiles);
+      return settleWin(next, next.userWind, false, prompt.from, winningTiles);
     });
 
-    await playCommentary("win", selectedChar);
+    await playCommentary("ron", selectedChar);
     await playCommentary("yaku", selectedChar);
   };
 
@@ -432,10 +690,15 @@ export default function GamePage() {
 
       const next = cloneState(prev);
       const tile = prompt.tile;
-      next.players.east.hand = removeNTiles(next.players.east.hand, tile, 2);
-      next.players.east.calledMelds.push({ type: "pon", tiles: [tile, tile, tile] });
+      next.players[next.userWind].hand = removeNTiles(next.players[next.userWind].hand, tile, 2);
+      next.players[next.userWind].calledMelds.push({
+        type: "pon",
+        tiles: [tile, tile, tile],
+        calledFrom: prompt.from,
+        calledIndex: 0,
+      });
       next.prompt = null;
-      next.turn = "east";
+      next.turn = next.userWind;
       return next;
     });
 
@@ -451,15 +714,20 @@ export default function GamePage() {
 
       const next = cloneState(prev);
       const tile = prompt.tile;
-      next.players.east.hand = removeNTiles(next.players.east.hand, tile, 3);
-      next.players.east.calledMelds.push({ type: "kan", tiles: [tile, tile, tile, tile] });
+      next.players[next.userWind].hand = removeNTiles(next.players[next.userWind].hand, tile, 3);
+      next.players[next.userWind].calledMelds.push({
+        type: "kan",
+        tiles: [tile, tile, tile, tile],
+        calledFrom: prompt.from,
+        calledIndex: 0,
+      });
       next.prompt = null;
-      next.turn = "east";
-      drawTileIfNeeded(next, "east");
+      next.turn = next.userWind;
+      drawTileIfNeeded(next, next.userWind);
       return next;
     });
 
-    await playVoice("カンですわ！", selectedChar);
+    await playCommentary("kan", selectedChar);
   };
 
   const onChi = async (chiSet: TileType[]) => {
@@ -473,28 +741,34 @@ export default function GamePage() {
       if (!prompt) return prev;
 
       const next = cloneState(prev);
-      next.players.east.hand = removeSpecificTiles(next.players.east.hand, need);
-      next.players.east.calledMelds.push({ type: "chi", tiles: chiSet });
+      next.players[next.userWind].hand = removeSpecificTiles(next.players[next.userWind].hand, need);
+      next.players[next.userWind].calledMelds.push({
+        type: "chi",
+        tiles: chiSet,
+        calledFrom: prompt.from,
+        calledIndex: chiSet.indexOf(target),
+      });
       next.prompt = null;
-      next.turn = "east";
+      next.turn = next.userWind;
       return next;
     });
 
-    await playVoice("チー、いただきますわ。", selectedChar);
+    await playCommentary("chi", selectedChar);
   };
 
   const onConcealedKan = async (tile: TileType) => {
-    if (state.turn !== "east" || state.prompt || state.winner || state.drawReason) return;
+    if (state.turn !== state.userWind || state.prompt || state.winner || state.drawReason) return;
 
     setState((prev) => {
       const next = cloneState(prev);
-      next.players.east.hand = removeNTiles(next.players.east.hand, tile, 4);
-      next.players.east.calledMelds.push({ type: "kan", tiles: [tile, tile, tile, tile] });
-      drawTileIfNeeded(next, "east");
+      consumeDrawnTile(next.players[next.userWind]);
+      next.players[next.userWind].hand = removeNTiles(next.players[next.userWind].hand, tile, 4);
+      next.players[next.userWind].calledMelds.push({ type: "kan", tiles: [tile, tile, tile, tile] });
+      drawTileIfNeeded(next, next.userWind);
       return next;
     });
 
-    await playVoice("暗槓ですわ。", selectedChar);
+    await playCommentary("kan", selectedChar);
   };
 
   const onSkip = () => {
@@ -505,8 +779,8 @@ export default function GamePage() {
       const next = cloneState(prev);
       next.prompt = null;
       next.turn = nextWind(prompt.from);
-      if (next.turn === "east") {
-        drawTileIfNeeded(next, "east");
+      if (next.turn === next.userWind) {
+        drawTileIfNeeded(next, next.userWind);
       }
       return next;
     });
@@ -517,27 +791,31 @@ export default function GamePage() {
       <section className="relative mx-auto h-screen w-full max-w-[1280px] p-3 md:p-6">
         <div className="absolute left-1/2 top-8 w-[58%] -translate-x-1/2 rounded-xl px-2 py-1 transition">
           <div className="mb-2 text-center text-xs text-blue-100">
-            南家 CPU {isSouthTurn ? "（打牌中）" : ""}
+            {seatWindLabel(topWind)} {turnOwnerLabel(topWind, state.userWind)} {isTopTurn ? "（打牌中）" : ""}
           </div>
-          <DiscardRiver tiles={state.players.south.discards} className={`mx-auto rounded-lg bg-black/30 p-2 transition ${isSouthTurn ? "ring-2 ring-amber-300/90 shadow-[0_0_24px_rgba(251,191,36,0.65)]" : ""}`} tileClass="h-9 w-7 rotate-180" />
+          <DiscardRiver tiles={state.players[topWind].discards} className={`mx-auto rounded-lg bg-black/30 p-2 transition ${isTopTurn ? "ring-2 ring-amber-300/90 shadow-[0_0_24px_rgba(251,191,36,0.65)]" : ""}`} tileClass="h-9 w-7 rotate-180" />
         </div>
 
         <div className="absolute left-4 top-[calc(30%+78px)] -translate-y-1/2 rounded-xl px-2 py-2 transition">
           <div className="relative flex items-center justify-center rounded-xl px-2 py-2 transition">
             <div className="pointer-events-none absolute left-0 top-1/2 -translate-y-1/2 rotate-90 whitespace-nowrap text-left text-xs text-blue-100">
-              西家 CPU {isWestTurn ? "（打牌中）" : ""}
+              {seatWindLabel(leftWind)} {turnOwnerLabel(leftWind, state.userWind)} {isLeftTurn ? "（打牌中）" : ""}
             </div>
-            <div className={`w-[20rem] rotate-90 origin-center rounded-xl transition ${isWestTurn ? "ring-2 ring-amber-300/90 shadow-[0_0_24px_rgba(251,191,36,0.65)]" : ""}`}>
-              <DiscardRiver tiles={state.players.west.discards} className="rounded-lg bg-black/30 p-2" tileClass="h-9 w-7" />
+            <div className={`w-[20rem] rotate-90 origin-center rounded-xl transition ${isLeftTurn ? "ring-2 ring-amber-300/90 shadow-[0_0_24px_rgba(251,191,36,0.65)]" : ""}`}>
+              <DiscardRiver tiles={state.players[leftWind].discards} className="rounded-lg bg-black/30 p-2" tileClass="h-9 w-7" />
             </div>
           </div>
         </div>
 
         <div className="absolute right-4 top-4 w-[360px] rounded-xl border border-cyan-400/40 bg-slate-950/70 p-3 shadow-2xl">
-          <div className="grid grid-cols-3 gap-3 text-center text-xs">
+          <div className="grid grid-cols-4 gap-3 text-center text-xs">
             <div>
               <p className="text-cyan-200">局</p>
               <p className="text-lg font-bold">{state.kyoku}</p>
+            </div>
+            <div>
+              <p className="text-cyan-200">場風</p>
+              <p className="text-lg font-bold">{roundWindLabel(state.roundWind)}</p>
             </div>
             <div>
               <p className="text-cyan-200">本場 / 供託</p>
@@ -552,9 +830,9 @@ export default function GamePage() {
           </div>
 
           <div className={`mt-3 grid grid-cols-3 gap-2 rounded-md border border-slate-700 p-2 text-center text-sm ${scoreFlash ? "animate-pulse" : ""}`}>
-            <div>東 {state.players.east.score}</div>
-            <div>南 {state.players.south.score}</div>
-            <div>西 {state.players.west.score}</div>
+            <div>{seatWindLabel(state.userWind)}（あなた） {state.players[state.userWind].score}</div>
+            <div>{seatWindLabel(topWind)}（{turnOwnerLabel(topWind, state.userWind)}） {state.players[topWind].score}</div>
+            <div>{seatWindLabel(leftWind)}（{turnOwnerLabel(leftWind, state.userWind)}） {state.players[leftWind].score}</div>
           </div>
 
           {state.kyotaku > 0 && <div className="mt-2 h-2 w-full animate-pulse rounded bg-rose-500" />}
@@ -609,37 +887,55 @@ export default function GamePage() {
           </aside>
         )}
 
-        <div className={`absolute bottom-2 left-1/2 w-[94%] -translate-x-1/2 rounded-xl border bg-black/35 p-3 md:p-4 transition ${isEastTurn ? "border-amber-300/90 shadow-[0_0_28px_rgba(251,191,36,0.6)]" : "border-emerald-300/40"}`}>
+        <div className={`absolute bottom-2 left-1/2 w-[94%] -translate-x-1/2 rounded-xl border bg-black/35 p-3 md:p-4 transition ${isUserTurn ? "border-amber-300/90 shadow-[0_0_28px_rgba(251,191,36,0.6)]" : "border-emerald-300/40"}`}>
           <div className="mb-2 flex items-center justify-between text-sm text-emerald-100">
-            <span>あなた（東家）{isEastTurn ? "（あなたの手番）" : ""} / シャンテン: {calculateShanten(me.hand) ?? "-"}</span>
-            <span>残り牌: {state.wall.length} / 実況: {currentCharacter?.name ?? selectedChar} / 手番: {turnLabel(state.turn)}（{turnOwnerLabel(state.turn)}）</span>
+            <span>あなた（{seatWindLabel(state.userWind)}）{isUserTurn ? "（あなたの手番）" : ""} / シャンテン: {calculateShanten(meFullHand) ?? "-"}</span>
+            <span>残り牌: {state.wall.length} / 実況: {currentCharacter?.name ?? selectedChar} / 手番: {turnLabel(state.turn)}（{turnOwnerLabel(state.turn, state.userWind)}）</span>
           </div>
 
-          {cpuActing && state.turn !== "east" && !state.prompt && !state.winner && !state.drawReason && (
+          {cpuActing && state.turn !== state.userWind && !state.prompt && !state.winner && !state.drawReason && (
             <div className="mb-2 text-center text-xs text-amber-200">{turnLabel(state.turn)} CPUが打牌中...</div>
           )}
 
-          <div className="flex justify-center items-end gap-2 overflow-x-auto pb-1">
+          <div className="flex items-end justify-center gap-2 overflow-x-auto pb-1">
             {me.hand.map((tile, index) => (
               <button key={`${tile}-${index}`} type="button" onClick={() => void discardByUser(index)} className="transition hover:-translate-y-1">
                 <Tile tile={tile} />
               </button>
             ))}
+            {me.drawnTile && (
+              <button type="button" onClick={() => void discardByUser(-1, true)} className="ml-6 transition hover:-translate-y-1">
+                <Tile tile={me.drawnTile} />
+              </button>
+            )}
 
             {me.calledMelds.map((meld, i) => (
               <div key={`meld-${i}`} className="ml-2 flex gap-1 rounded-md border border-amber-400/60 bg-black/30 p-1">
-                {meld.tiles.map((tile, j) => (
-                  <Tile key={`meld-tile-${i}-${j}`} tile={tile} className={j === meld.tiles.length - 1 ? "h-14 w-10 rotate-90" : "h-14 w-10"} />
-                ))}
+                {meld.tiles.map((tile, j) => {
+                  const isCalled = typeof meld.calledIndex === "number" && meld.calledIndex === j && meld.calledFrom;
+                  return (
+                    <div key={`meld-tile-${i}-${j}`} className="relative">
+                      <Tile
+                        tile={tile}
+                        className={`${j === meld.tiles.length - 1 ? "h-14 w-10 rotate-90" : "h-14 w-10"} ${isCalled ? "ring-2 ring-rose-300/90 shadow-[0_0_10px_rgba(251,113,133,0.6)]" : ""}`}
+                      />
+                      {isCalled && (
+                        <span className="absolute -right-1 -top-1 rounded bg-rose-500 px-1 text-[10px] font-bold text-black">
+                          取
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             ))}
           </div>
         </div>
 
-        {state.winner && (
+        {state.winner && !state.gameOver && (
           <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/65 p-4">
             <div className="w-full max-w-lg rounded-xl border border-amber-300/50 bg-slate-900 p-5">
-              <h2 className="text-2xl font-black">{state.winner.winner === "east" ? "あなたの和了" : "CPUの和了"}</h2>
+              <h2 className="text-2xl font-black">{state.winner.winner === state.userWind ? "あなたの和了" : "CPUの和了"}</h2>
               <p className="mt-1 text-amber-200">{state.winner.byTsumo ? "ツモ" : "ロン"} / {state.winner.pointLabel}</p>
               <div className="mt-3 flex flex-wrap gap-2">
                 {state.winner.yaku.map((name) => (
@@ -651,11 +947,51 @@ export default function GamePage() {
               <button
                 type="button"
                 onClick={() => {
-                  const reset = createInitialState();
+                  const endCheck = shouldEndGame(state);
+                  if (endCheck.end) {
+                    setState((prev) => ({
+                      ...prev,
+                      winner: null,
+                      drawReason: null,
+                      gameOver: {
+                        reason: endCheck.reason,
+                        rankings: buildRankings(prev),
+                      },
+                    }));
+                    return;
+                  }
+
+                  const shouldRotateSeats =
+                    state.winner ? state.winner.winner !== "east" || !dealerHasYaku(state) : false;
+                  const nextKyokuNumber = shouldRotateSeats ? state.kyokuNumber + 1 : state.kyokuNumber;
+                  const shouldAdvanceRoundWind = shouldRotateSeats && nextKyokuNumber > 3;
+                  const nextRoundWind = shouldAdvanceRoundWind ? nextWind(state.roundWind) : state.roundWind;
+                  const normalizedKyokuNumber = shouldAdvanceRoundWind ? 1 : nextKyokuNumber;
+                  const nextHonba = state.winner?.winner === "east" ? state.honba + 1 : 0;
+                  const nextKyotaku = 0;
+                  const baseScores = {
+                    east: state.players.east.score,
+                    south: state.players.south.score,
+                    west: state.players.west.score,
+                  };
+                  const nextScores = shouldRotateSeats ? rotateScores(baseScores) : baseScores;
+                  const nextUserWind = shouldRotateSeats ? nextWind(state.userWind) : state.userWind;
+                  const reset = createInitialState({
+                    roundWind: nextRoundWind,
+                    kyokuNumber: normalizedKyokuNumber,
+                    scores: {
+                      east: nextScores.east,
+                      south: nextScores.south,
+                      west: nextScores.west,
+                    },
+                    honba: nextHonba,
+                    kyotaku: nextKyotaku,
+                    userWind: nextUserWind,
+                  });
                   setState(reset);
                   setScoreFlash(true);
                   window.setTimeout(() => setScoreFlash(false), 1100);
-                  void playVoice("よろしくお願いしますわ！", selectedChar);
+                  void playCommentary("start", selectedChar);
                 }}
                 className="mt-5 rounded-md bg-cyan-500 px-4 py-2 font-bold text-black hover:bg-cyan-400"
               >
@@ -665,15 +1001,69 @@ export default function GamePage() {
           </div>
         )}
 
-        {state.drawReason && !state.winner && (
+        {state.drawReason && !state.winner && !state.gameOver && (
           <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/65 p-4">
             <div className="w-full max-w-lg rounded-xl border border-sky-300/50 bg-slate-900 p-5">
               <h2 className="text-2xl font-black">流局</h2>
               <p className="mt-1 text-sky-200">{state.drawReason}</p>
+              <div className="mt-4 space-y-2">
+                {buildDrawYakuSummary(state).map((entry) => (
+                  <div key={`draw-yaku-${entry.wind}`} className="rounded-md border border-slate-700 bg-black/30 px-3 py-2 text-sm">
+                    <div className="font-bold">
+                      {seatWindLabel(entry.wind)}（{turnOwnerLabel(entry.wind, state.userWind)}）
+                    </div>
+                    <div className="mt-1 flex flex-wrap gap-2">
+                      {entry.yaku.map((name) => (
+                        <span key={`${entry.wind}-${name}`} className="rounded bg-sky-500/20 px-2 py-1 text-xs text-sky-100">
+                          {name}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
               <button
                 type="button"
                 onClick={() => {
-                  const reset = createInitialState();
+                  const endCheck = shouldEndGame(state);
+                  if (endCheck.end) {
+                    setState((prev) => ({
+                      ...prev,
+                      winner: null,
+                      drawReason: null,
+                      gameOver: {
+                        reason: endCheck.reason,
+                        rankings: buildRankings(prev),
+                      },
+                    }));
+                    return;
+                  }
+
+                  const eastTenpai = isTenpai(state.players.east);
+                  const shouldRotateSeats = !eastTenpai && !dealerHasMenzenTsumo(state);
+                  const nextKyokuNumber = shouldRotateSeats ? state.kyokuNumber + 1 : state.kyokuNumber;
+                  const shouldAdvanceRoundWind = shouldRotateSeats && nextKyokuNumber > 3;
+                  const nextRoundWind = shouldAdvanceRoundWind ? nextWind(state.roundWind) : state.roundWind;
+                  const normalizedKyokuNumber = shouldAdvanceRoundWind ? 1 : nextKyokuNumber;
+                  const baseScores = {
+                    east: state.players.east.score,
+                    south: state.players.south.score,
+                    west: state.players.west.score,
+                  };
+                  const nextScores = shouldRotateSeats ? rotateScores(baseScores) : baseScores;
+                  const nextUserWind = shouldRotateSeats ? nextWind(state.userWind) : state.userWind;
+                  const reset = createInitialState({
+                    roundWind: nextRoundWind,
+                    kyokuNumber: normalizedKyokuNumber,
+                    scores: {
+                      east: nextScores.east,
+                      south: nextScores.south,
+                      west: nextScores.west,
+                    },
+                    honba: state.honba + 1,
+                    kyotaku: state.kyotaku,
+                    userWind: nextUserWind,
+                  });
                   setState(reset);
                   setScoreFlash(true);
                   window.setTimeout(() => setScoreFlash(false), 1100);
@@ -681,6 +1071,39 @@ export default function GamePage() {
                 className="mt-5 rounded-md bg-sky-500 px-4 py-2 font-bold text-black hover:bg-sky-400"
               >
                 次局へ
+              </button>
+            </div>
+          </div>
+        )}
+
+        {state.gameOver && (
+          <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/75 p-4">
+            <div className="w-full max-w-lg rounded-xl border border-emerald-300/60 bg-slate-900 p-5">
+              <h2 className="text-2xl font-black">終局</h2>
+              <p className="mt-1 text-emerald-200">{state.gameOver.reason}</p>
+              <div className="mt-4 space-y-2">
+                {state.gameOver.rankings.map((entry, index) => (
+                  <div key={entry.wind} className="flex items-center justify-between rounded-md border border-emerald-500/30 bg-black/40 px-3 py-2 text-sm">
+                    <div>
+                      <span className="mr-2 font-bold">{index + 1}位</span>
+                      <span>{entry.seatLabel}（{entry.owner}）</span>
+                    </div>
+                    <div className="font-bold">{entry.score}</div>
+                  </div>
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  const reset = createInitialState();
+                  setState(reset);
+                  setScoreFlash(true);
+                  window.setTimeout(() => setScoreFlash(false), 1100);
+                  void playCommentary("start", selectedChar);
+                }}
+                className="mt-5 rounded-md bg-emerald-500 px-4 py-2 font-bold text-black hover:bg-emerald-400"
+              >
+                新規開始
               </button>
             </div>
           </div>

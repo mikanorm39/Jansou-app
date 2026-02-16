@@ -1,42 +1,44 @@
-import scripts from "../data/scripts.json";
+export type CommentaryEvent =
+  | "preview"
+  | "start"
+  | "reach"
+  | "pon"
+  | "chi"
+  | "kan"
+  | "win"
+  | "ron"
+  | "tsumo"
+  | "lose"
+  | "draw"
+  | "yaku"
+  | "turn_hurry"
+  | "repeat_discard";
 
-type EventKey = "start" | "reach" | "pon" | "kan" | "win" | "draw" | "yaku";
-type ScriptMap = Record<string, Partial<Record<EventKey, string>>>;
+async function playAudioFromUrl(url: string): Promise<void> {
+  const audio = new Audio(url);
+  await audio.play();
+}
 
-export async function playVoice(text: string, characterType: string): Promise<void> {
+export async function playCommentary(
+  event: CommentaryEvent,
+  characterType: string,
+): Promise<void> {
   try {
     const params = new URLSearchParams({
-      text,
       character: characterType,
+      event,
     });
 
     const response = await fetch(`/api/voice?${params.toString()}`, {
       method: "GET",
     });
+    if (!response.ok) return;
 
-    if (!response.ok) {
-      const detail = await response.text();
-      throw new Error(`Voice API failed: ${response.status} ${detail}`);
-    }
+    const data = (await response.json()) as { url?: string | null };
+    if (!data.url) return;
 
-    const blob = await response.blob();
-    const url = URL.createObjectURL(blob);
-    const audio = new Audio(url);
-    audio.addEventListener("ended", () => URL.revokeObjectURL(url));
-    await audio.play();
+    await playAudioFromUrl(data.url);
   } catch (error) {
     console.error("Voice playback failed:", error);
   }
-}
-
-export async function playCommentary(event: string, characterType: string): Promise<void> {
-  const scriptMap = scripts as ScriptMap;
-  const known = ["start", "reach", "pon", "kan", "win", "draw", "yaku"];
-  const eventKey = (known.includes(event) ? event : "start") as EventKey;
-  const line =
-    scriptMap[characterType]?.[eventKey] ??
-    scriptMap.default?.[eventKey] ??
-    "対局が進行しています。";
-
-  await playVoice(line, characterType);
 }
