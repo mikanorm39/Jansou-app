@@ -1,9 +1,29 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 
 export default function TitlePage() {
   const router = useRouter();
+  const waitingBgmRef = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    const audio = new Audio("/sounds/hitori.wav");
+    audio.loop = true;
+    audio.preload = "auto";
+    audio.volume = 0.25;
+    waitingBgmRef.current = audio;
+
+    void audio.play().catch(() => {
+      // Ignore autoplay restrictions; playback can start after user interaction.
+    });
+
+    return () => {
+      audio.pause();
+      audio.currentTime = 0;
+      waitingBgmRef.current = null;
+    };
+  }, []);
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-[linear-gradient(180deg,#14532d_0%,#052e16_70%)] p-6 text-white">
