@@ -3,42 +3,18 @@ import type { Tile, PlayerWind } from "../types/mahjong";
 const SUITS: Array<"m" | "p" | "s"> = ["m", "p", "s"];
 const HONORS = ["z1", "z2", "z3", "z4", "z5", "z6", "z7"] as const;
 
-const TILE_ORDER: Record<string, number> = {
-  m1: 1,
-  m2: 2,
-  m3: 3,
-  m4: 4,
-  m5: 5,
-  m6: 6,
-  m7: 7,
-  m8: 8,
-  m9: 9,
-  p1: 11,
-  p2: 12,
-  p3: 13,
-  p4: 14,
-  p5: 15,
-  p6: 16,
-  p7: 17,
-  p8: 18,
-  p9: 19,
-  s1: 21,
-  s2: 22,
-  s3: 23,
-  s4: 24,
-  s5: 25,
-  s6: 26,
-  s7: 27,
-  s8: 28,
-  s9: 29,
-  z1: 31,
-  z2: 32,
-  z3: 33,
-  z4: 34,
-  z5: 35,
-  z6: 36,
-  z7: 37,
+const SUIT_ORDER: Record<"m" | "p" | "s" | "z", number> = {
+  m: 0,
+  p: 1,
+  s: 2,
+  z: 3,
 };
+
+function tileSortKey(tile: Tile): number {
+  const suit = tile[0] as "m" | "p" | "s" | "z";
+  const rank = Number(tile.slice(1));
+  return SUIT_ORDER[suit] * 10 + rank;
+}
 
 export type InitialDeal = {
   players: Record<PlayerWind, Tile[]>;
@@ -76,7 +52,7 @@ export function fisherYatesShuffle<T>(source: T[]): T[] {
 }
 
 export function sortTiles(tiles: Tile[]): Tile[] {
-  return [...tiles].sort((a, b) => TILE_ORDER[a] - TILE_ORDER[b]);
+  return [...tiles].sort((a, b) => tileSortKey(a) - tileSortKey(b));
 }
 
 export function dealInitialHands(shuffledDeck = fisherYatesShuffle(buildThreePlayerDeck())): InitialDeal {

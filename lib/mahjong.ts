@@ -437,3 +437,7 @@ export function evaluateHandYaku(hand: Tile[], winningTile: Tile, context: HandC
   return calculateHandResult([...hand, winningTile], context);
 }
 
+export function evaluateHandTiles(tiles: Tile[], context: HandContext): HandResult {
+  return calculateHandResult(tiles, context);
+}
+
