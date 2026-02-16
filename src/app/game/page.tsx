@@ -298,6 +298,12 @@ export default function GamePage() {
   const hurryTimerRef = useRef<number | null>(null);
   const playedWinnerRef = useRef<string | null>(null);
   const discardSoundRef = useRef<HTMLAudioElement | null>(null);
+  const bgmRef = useRef<HTMLAudioElement | null>(null);
+  const currentBgmTrackRef = useRef<string | null>(null);
+  const callSoundRef = useRef<HTMLAudioElement | null>(null);
+  const winSoundRef = useRef<HTMLAudioElement | null>(null);
+  const callPromptVisibleRef = useRef(false);
+  const winPromptVisibleRef = useRef(false);
 
   useEffect(() => {
     void playCommentary("start", selectedChar);
@@ -355,6 +361,67 @@ export default function GamePage() {
   }, []);
 
   useEffect(() => {
+    const callAudio = new Audio("/sounds/パパッ.mp3");
+    callAudio.preload = "auto";
+    callSoundRef.current = callAudio;
+
+    const winAudio = new Audio("/sounds/きらーん2.mp3");
+    winAudio.preload = "auto";
+    winSoundRef.current = winAudio;
+
+    return () => {
+      callSoundRef.current = null;
+      winSoundRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const audio = new Audio();
+    audio.loop = true;
+    audio.preload = "auto";
+    audio.volume = 0.25;
+    bgmRef.current = audio;
+
+    return () => {
+      audio.pause();
+      audio.currentTime = 0;
+      bgmRef.current = null;
+      currentBgmTrackRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const audio = bgmRef.current;
+    if (!audio) return;
+
+    const inMatch = !state.winner && !state.drawReason;
+    const nextTrack = inMatch
+      ? state.players.east.isReach
+        ? "/sounds/ghost.wav"
+        : "/sounds/denno.wav"
+      : null;
+
+    if (!nextTrack) {
+      audio.pause();
+      audio.currentTime = 0;
+      currentBgmTrackRef.current = null;
+      return;
+    }
+
+    if (currentBgmTrackRef.current !== nextTrack) {
+      audio.src = nextTrack;
+      audio.currentTime = 0;
+      currentBgmTrackRef.current = nextTrack;
+    }
+
+    if (audio.paused) {
+      void audio.play().catch(() => {
+        // Ignore autoplay restrictions; playback resumes after user interaction.
+      });
+    }
+  }, [state.winner, state.drawReason, state.players.east.isReach]);
+
+  useEffect(() => {
     if (!state.lastDiscard) return;
 
     const audio = discardSoundRef.current;
@@ -365,6 +432,14 @@ export default function GamePage() {
       // Ignore browser autoplay rejections and continue gameplay.
     });
   }, [state.lastDiscard]);
+
+  const playSe = (audio: HTMLAudioElement | null) => {
+    if (!audio) return;
+    audio.currentTime = 0;
+    void audio.play().catch(() => {
+      // Ignore autoplay rejections and keep gameplay running.
+    });
+  };
 
   const scheduleCpuTurn = () => {
     if (cpuTimerRef.current !== null) {
@@ -407,6 +482,28 @@ export default function GamePage() {
   const canReach = !state.prompt && !state.winner && !state.drawReason && state.turn === "east" && me.calledMelds.length === 0 && canDeclareReach(me.hand, me.isReach);
   const canTsumo = !state.prompt && !state.winner && !state.drawReason && state.turn === "east" && isWinningHand(me.hand);
   const concealedKans = !state.prompt && !state.winner && !state.drawReason && state.turn === "east" ? concealedKanOptions(me.hand) : [];
+  const isCallPromptVisible = Boolean(
+    canReach ||
+    concealedKans.length > 0 ||
+    state.prompt?.canPon ||
+    state.prompt?.canKan ||
+    (state.prompt?.chiOptions.length ?? 0) > 0,
+  );
+  const isWinPromptVisible = Boolean(canTsumo || state.prompt?.canRon);
+
+  useEffect(() => {
+    if (isCallPromptVisible && !callPromptVisibleRef.current) {
+      playSe(callSoundRef.current);
+    }
+    callPromptVisibleRef.current = isCallPromptVisible;
+  }, [isCallPromptVisible]);
+
+  useEffect(() => {
+    if (isWinPromptVisible && !winPromptVisibleRef.current) {
+      playSe(winSoundRef.current);
+    }
+    winPromptVisibleRef.current = isWinPromptVisible;
+  }, [isWinPromptVisible]);
 
   const discardByUser = async (index: number) => {
     if (state.turn !== "east" || state.prompt || state.winner || state.drawReason) return;
