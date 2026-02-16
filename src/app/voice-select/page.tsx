@@ -1,11 +1,31 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { characters } from "../../../data/characters";
 import { playCommentary } from "../../../lib/voiceService";
 
 export default function VoiceSelectPage() {
   const router = useRouter();
+  const waitingBgmRef = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    const audio = new Audio("/sounds/hitori.wav");
+    audio.loop = true;
+    audio.preload = "auto";
+    audio.volume = 0.25;
+    waitingBgmRef.current = audio;
+
+    void audio.play().catch(() => {
+      // Ignore autoplay restrictions; playback can start after user interaction.
+    });
+
+    return () => {
+      audio.pause();
+      audio.currentTime = 0;
+      waitingBgmRef.current = null;
+    };
+  }, []);
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-[linear-gradient(180deg,#0f3f7a_0%,#05152b_70%)] p-6 text-white">
