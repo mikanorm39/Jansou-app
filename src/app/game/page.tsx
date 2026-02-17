@@ -35,6 +35,8 @@ type PlayerState = {
   discards: TileType[];
   score: number;
   isReach: boolean;
+  ippatsuEligible: boolean;
+  ippatsuPrimed: boolean;
   calledMelds: MeldState[];
 };
 
@@ -134,6 +136,8 @@ function cloneState(state: GameState): GameState {
         drawnTile: state.players.east.drawnTile,
         discards: [...state.players.east.discards],
         calledMelds: state.players.east.calledMelds.map((m) => ({ ...m, tiles: [...m.tiles] })),
+        ippatsuEligible: state.players.east.ippatsuEligible,
+        ippatsuPrimed: state.players.east.ippatsuPrimed,
       },
       south: {
         ...state.players.south,
@@ -141,6 +145,8 @@ function cloneState(state: GameState): GameState {
         drawnTile: state.players.south.drawnTile,
         discards: [...state.players.south.discards],
         calledMelds: state.players.south.calledMelds.map((m) => ({ ...m, tiles: [...m.tiles] })),
+        ippatsuEligible: state.players.south.ippatsuEligible,
+        ippatsuPrimed: state.players.south.ippatsuPrimed,
       },
       west: {
         ...state.players.west,
@@ -148,9 +154,18 @@ function cloneState(state: GameState): GameState {
         drawnTile: state.players.west.drawnTile,
         discards: [...state.players.west.discards],
         calledMelds: state.players.west.calledMelds.map((m) => ({ ...m, tiles: [...m.tiles] })),
+        ippatsuEligible: state.players.west.ippatsuEligible,
+        ippatsuPrimed: state.players.west.ippatsuPrimed,
       },
     },
   };
+}
+
+function clearIppatsu(state: GameState) {
+  for (const wind of WINDS) {
+    state.players[wind].ippatsuEligible = false;
+    state.players[wind].ippatsuPrimed = false;
+  }
 }
 
 function drawTileIfNeeded(state: GameState, wind: PlayerWind): boolean {
@@ -199,6 +214,7 @@ function settleWin(
     winningTiles,
     context: {
       isReach: state.players[winner].isReach,
+      isIppatsu: state.players[winner].isReach && state.players[winner].ippatsuEligible,
       doraIndicator: state.doraIndicator,
       isMenzen: state.players[winner].calledMelds.length === 0,
       seatWind: winner,
@@ -276,8 +292,10 @@ function resolveCpuTurn(state: GameState): GameState {
   }
 
   const cpuFull = fullHand(cpu);
-  const discardIndex = chooseCpuDiscard(cpuFull, threateningDiscards);
+  const reachDiscardIndex = cpu.calledMelds.length === 0 ? findReachDiscardIndex(cpuFull, cpu.isReach) : null;
+  const discardIndex = reachDiscardIndex ?? chooseCpuDiscard(cpuFull, threateningDiscards);
   const tile = cpuFull[discardIndex];
+  const declaredReachThisDiscard = reachDiscardIndex !== null && !cpu.isReach;
   if (cpu.drawnTile && cpu.drawnTile === tile) {
     cpu.drawnTile = null;
   } else {
@@ -286,6 +304,18 @@ function resolveCpuTurn(state: GameState): GameState {
   }
   cpu.discards.push(tile);
   next.lastDiscard = { from: wind, tile };
+  if (reachDiscardIndex !== null && !cpu.isReach) {
+    cpu.isReach = true;
+    cpu.ippatsuPrimed = true;
+    cpu.score -= 1000;
+    next.kyotaku += 1;
+  }
+  if (cpu.ippatsuPrimed) {
+    cpu.ippatsuPrimed = false;
+    cpu.ippatsuEligible = true;
+  } else if (cpu.isReach && cpu.ippatsuEligible && !declaredReachThisDiscard) {
+    cpu.ippatsuEligible = false;
+  }
 
   const user = next.players[next.userWind];
   const ron = isWinningHand([...user.hand, tile]);
@@ -321,6 +351,15 @@ function turnOwnerLabel(wind: PlayerWind, userWind: PlayerWind): string {
   return cpuIndex === 1 ? "CPU1" : "CPU2";
 }
 
+function findReachDiscardIndex(hand: TileType[], alreadyReached: boolean): number | null {
+  if (!canDeclareReach(hand, alreadyReached)) return null;
+  for (let i = 0; i < hand.length; i += 1) {
+    const next = [...hand.slice(0, i), ...hand.slice(i + 1)];
+    if (calculateShanten(next) === 0) return i;
+  }
+  return null;
+}
+
 function buildRankings(state: GameState): RankingEntry[] {
   return [...WINDS]
     .map((wind) => ({
@@ -333,9 +372,9 @@ function buildRankings(state: GameState): RankingEntry[] {
 }
 
 function shouldEndGame(state: GameState): { end: boolean; reason: string } {
-  const anyNegative = WINDS.some((wind) => state.players[wind].score < 0);
-  if (anyNegative) {
-    return { end: true, reason: "持ち点がマイナスになりました" };
+  const anyTobi = WINDS.some((wind) => state.players[wind].score <= 0);
+  if (anyTobi) {
+    return { end: true, reason: "飛び（持ち点が0点以下）" };
   }
 
   const isEastRound3 = state.roundWind === "east" && state.kyokuNumber === 3;
@@ -364,9 +403,9 @@ function createInitialState(options?: {
 
   const state: GameState = {
     players: {
-      east: { hand: dealt.players.east, drawnTile: null, discards: [], score: scores.east, isReach: false, calledMelds: [] },
-      south: { hand: dealt.players.south, drawnTile: null, discards: [], score: scores.south, isReach: false, calledMelds: [] },
-      west: { hand: dealt.players.west, drawnTile: null, discards: [], score: scores.west, isReach: false, calledMelds: [] },
+      east: { hand: dealt.players.east, drawnTile: null, discards: [], score: scores.east, isReach: false, ippatsuEligible: false, ippatsuPrimed: false, calledMelds: [] },
+      south: { hand: dealt.players.south, drawnTile: null, discards: [], score: scores.south, isReach: false, ippatsuEligible: false, ippatsuPrimed: false, calledMelds: [] },
+      west: { hand: dealt.players.west, drawnTile: null, discards: [], score: scores.west, isReach: false, ippatsuEligible: false, ippatsuPrimed: false, calledMelds: [] },
     },
     wall,
     turn: "east",
@@ -438,6 +477,7 @@ function buildDrawYakuSummary(state: GameState): Array<{ wind: PlayerWind; yaku:
 
     const result = evaluateHandTiles(tiles, {
       isReach: player.isReach,
+      isIppatsu: false,
       doraIndicator: state.doraIndicator,
       isMenzen: player.calledMelds.length === 0,
       byTsumo: false,
@@ -455,6 +495,7 @@ function dealerHasYaku(state: GameState): boolean {
   if (!isWinningHand(tiles)) return false;
   const result = evaluateHandTiles(tiles, {
     isReach: dealer.isReach,
+    isIppatsu: false,
     doraIndicator: state.doraIndicator,
     isMenzen: dealer.calledMelds.length === 0,
     byTsumo: false,
@@ -471,6 +512,7 @@ function dealerHasMenzenTsumo(state: GameState): boolean {
   if (!isWinningHand(tiles)) return false;
   const result = evaluateHandTiles(tiles, {
     isReach: dealer.isReach,
+    isIppatsu: false,
     doraIndicator: state.doraIndicator,
     isMenzen: true,
     byTsumo: true,
@@ -738,6 +780,7 @@ export default function GamePage() {
     if (!tile) return;
     const previousDiscard = draft.players[draft.userWind].discards.at(-1) ?? null;
     const isRepeatDiscard = previousDiscard === tile;
+    const declaredReachThisDiscard = player.ippatsuPrimed;
 
     if (fromDrawn) {
       player.drawnTile = null;
@@ -747,6 +790,12 @@ export default function GamePage() {
     }
     player.discards.push(tile);
     draft.lastDiscard = { from: draft.userWind, tile };
+    if (player.ippatsuPrimed) {
+      player.ippatsuPrimed = false;
+      player.ippatsuEligible = true;
+    } else if (player.isReach && player.ippatsuEligible && !declaredReachThisDiscard) {
+      player.ippatsuEligible = false;
+    }
 
     const ronWinner = findCpuRonWinner(draft, tile);
     if (ronWinner) {
@@ -767,6 +816,8 @@ export default function GamePage() {
     setState((prev) => {
       const next = cloneState(prev);
       next.players[next.userWind].isReach = true;
+      next.players[next.userWind].ippatsuPrimed = true;
+      next.players[next.userWind].ippatsuEligible = false;
       next.players[next.userWind].score -= 1000;
       next.kyotaku += 1;
       return next;
@@ -811,6 +862,7 @@ export default function GamePage() {
       if (!prompt) return prev;
 
       const next = cloneState(prev);
+      clearIppatsu(next);
       const tile = prompt.tile;
       next.players[next.userWind].hand = removeNTiles(next.players[next.userWind].hand, tile, 2);
       next.players[next.userWind].calledMelds.push({
@@ -835,6 +887,7 @@ export default function GamePage() {
       if (!prompt) return prev;
 
       const next = cloneState(prev);
+      clearIppatsu(next);
       const tile = prompt.tile;
       next.players[next.userWind].hand = removeNTiles(next.players[next.userWind].hand, tile, 3);
       next.players[next.userWind].calledMelds.push({
@@ -863,6 +916,7 @@ export default function GamePage() {
       if (!prompt) return prev;
 
       const next = cloneState(prev);
+      clearIppatsu(next);
       next.players[next.userWind].hand = removeSpecificTiles(next.players[next.userWind].hand, need);
       next.players[next.userWind].calledMelds.push({
         type: "chi",
@@ -883,6 +937,7 @@ export default function GamePage() {
 
     setState((prev) => {
       const next = cloneState(prev);
+      clearIppatsu(next);
       consumeDrawnTile(next.players[next.userWind]);
       next.players[next.userWind].hand = removeNTiles(next.players[next.userWind].hand, tile, 4);
       next.players[next.userWind].calledMelds.push({ type: "kan", tiles: [tile, tile, tile, tile] });
@@ -920,7 +975,7 @@ export default function GamePage() {
 
         <div className="absolute left-4 top-[calc(30%+78px)] -translate-y-1/2 rounded-xl px-2 py-2 transition">
           <div className="relative flex items-center justify-center rounded-xl px-2 py-2 transition">
-            <div className="pointer-events-none absolute left-0 top-1/2 -translate-y-1/2 rotate-90 whitespace-nowrap text-left text-xs text-blue-100">
+            <div className="pointer-events-none absolute -left-6 top-1/2 z-20 -translate-y-1/2 rotate-90 whitespace-nowrap text-left text-xs text-blue-100">
               {seatWindLabel(leftWind)} {turnOwnerLabel(leftWind, state.userWind)} {isLeftTurn ? "（打牌中）" : ""}
             </div>
             <div className={`w-[20rem] rotate-90 origin-center rounded-xl transition ${isLeftTurn ? "ring-2 ring-amber-300/90 shadow-[0_0_24px_rgba(251,191,36,0.65)]" : ""}`}>
@@ -929,7 +984,7 @@ export default function GamePage() {
           </div>
         </div>
 
-        <div className="absolute right-4 top-4 w-[360px] rounded-xl border border-cyan-400/40 bg-slate-950/70 p-3 shadow-2xl">
+        <div className="absolute right-4 top-4 w-[420px] rounded-xl border border-cyan-400/40 bg-slate-950/70 p-3 shadow-2xl">
           <div className="grid grid-cols-4 gap-3 text-center text-xs">
             <div>
               <p className="text-cyan-200">局</p>
@@ -951,11 +1006,33 @@ export default function GamePage() {
             </div>
           </div>
 
-          <div className={`mt-3 grid grid-cols-3 gap-2 rounded-md border border-slate-700 p-2 text-center text-sm ${scoreFlash ? "animate-pulse" : ""}`}>
-            <div>{seatWindLabel(state.userWind)}（あなた） {state.players[state.userWind].score}</div>
-            <div>{seatWindLabel(topWind)}（{turnOwnerLabel(topWind, state.userWind)}） {state.players[topWind].score}</div>
-            <div>{seatWindLabel(leftWind)}（{turnOwnerLabel(leftWind, state.userWind)}） {state.players[leftWind].score}</div>
+          <div className={`mt-3 grid grid-cols-3 gap-3 rounded-md border border-slate-700 p-2 text-center text-sm ${scoreFlash ? "animate-pulse" : ""}`}>
+            <div className={`flex min-h-[52px] flex-col items-center justify-center gap-1 rounded-md px-1 ${state.players[state.userWind].isReach ? "ring-1 ring-rose-300/70" : ""}`}>
+              <span>{seatWindLabel(state.userWind)}（あなた） {state.players[state.userWind].score}</span>
+              <span
+                className={`h-[18px] rounded-full bg-gradient-to-r from-rose-500 to-amber-400 px-2.5 py-0.5 text-[10px] font-black tracking-widest text-black shadow-[0_0_12px_rgba(251,113,133,0.7)] ${state.players[state.userWind].isReach ? "" : "opacity-0"}`}
+              >
+                リーチ
+              </span>
+            </div>
+            <div className={`flex min-h-[52px] flex-col items-center justify-center gap-1 rounded-md px-1 ${state.players[topWind].isReach ? "ring-1 ring-rose-300/70" : ""}`}>
+              <span>{seatWindLabel(topWind)}（{turnOwnerLabel(topWind, state.userWind)}） {state.players[topWind].score}</span>
+              <span
+                className={`h-[18px] rounded-full bg-gradient-to-r from-rose-500 to-amber-400 px-2.5 py-0.5 text-[10px] font-black tracking-widest text-black shadow-[0_0_12px_rgba(251,113,133,0.7)] ${state.players[topWind].isReach ? "" : "opacity-0"}`}
+              >
+                リーチ
+              </span>
+            </div>
+            <div className={`flex min-h-[52px] flex-col items-center justify-center gap-1 rounded-md px-1 ${state.players[leftWind].isReach ? "ring-1 ring-rose-300/70" : ""}`}>
+              <span>{seatWindLabel(leftWind)}（{turnOwnerLabel(leftWind, state.userWind)}） {state.players[leftWind].score}</span>
+              <span
+                className={`h-[18px] rounded-full bg-gradient-to-r from-rose-500 to-amber-400 px-2.5 py-0.5 text-[10px] font-black tracking-widest text-black shadow-[0_0_12px_rgba(251,113,133,0.7)] ${state.players[leftWind].isReach ? "" : "opacity-0"}`}
+              >
+                リーチ
+              </span>
+            </div>
           </div>
+
 
           {state.kyotaku > 0 && <div className="mt-2 h-2 w-full animate-pulse rounded bg-rose-500" />}
         </div>
@@ -966,6 +1043,14 @@ export default function GamePage() {
 
         {(state.prompt || canReach || canTsumo || concealedKans.length > 0) && !state.winner && !state.drawReason && (
           <aside className="absolute right-4 top-1/2 z-20 flex -translate-y-1/2 flex-col gap-2 rounded-xl border border-amber-300/50 bg-black/65 p-3">
+            {state.prompt && (state.prompt.canPon || state.prompt.canKan || state.prompt.chiOptions.length > 0) && (
+              <div className="mb-1 rounded-md border border-rose-400/70 bg-black/35 p-2">
+                <div className="mb-1 text-center text-xs font-bold text-rose-200">対象牌</div>
+                <div className="mx-auto w-fit rounded-md p-1 ring-2 ring-rose-400/90 shadow-[0_0_12px_rgba(251,113,133,0.55)]">
+                  <Tile tile={state.prompt.tile} className="h-14 w-10" />
+                </div>
+              </div>
+            )}
             {state.prompt?.canPon && (
               <button type="button" onClick={onPon} className="rounded-md bg-orange-500 px-4 py-2 font-bold text-black hover:bg-orange-400">
                 ポン
@@ -1032,20 +1117,11 @@ export default function GamePage() {
             )}
 
             {me.calledMelds.map((meld, i) => (
-              <div key={`meld-${i}`} className="ml-2 flex gap-1 rounded-md border border-amber-400/60 bg-black/30 p-1">
+              <div key={`meld-${i}`} className="ml-2 flex gap-1 rounded-md border-2 border-amber-300/90 bg-black/30 py-2 pl-2 pr-4 shadow-[0_0_10px_rgba(252,211,77,0.35)]">
                 {meld.tiles.map((tile, j) => {
-                  const isCalled = typeof meld.calledIndex === "number" && meld.calledIndex === j && meld.calledFrom;
                   return (
                     <div key={`meld-tile-${i}-${j}`} className="relative">
-                      <Tile
-                        tile={tile}
-                        className={`${j === meld.tiles.length - 1 ? "h-14 w-10 rotate-90" : "h-14 w-10"} ${isCalled ? "ring-2 ring-rose-300/90 shadow-[0_0_10px_rgba(251,113,133,0.6)]" : ""}`}
-                      />
-                      {isCalled && (
-                        <span className="absolute -right-1 -top-1 rounded bg-rose-500 px-1 text-[10px] font-bold text-black">
-                          取
-                        </span>
-                      )}
+                      <Tile tile={tile} className={`${j === meld.tiles.length - 1 ? "h-14 w-10 rotate-90" : "h-14 w-10"}`} />
                     </div>
                   );
                 })}
