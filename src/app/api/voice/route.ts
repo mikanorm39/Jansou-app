@@ -1,24 +1,68 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
 
 const VOICE_ROOT_DIR = path.join(process.cwd(), "public", "user-voices");
-const REPEAT_DISCARD_QUOTES = ["なんでまた", "君はいらないのだ"];
 
-const EVENT_KEYWORDS: Record<string, string[]> = {
-  preview: ["preview", "自己紹介", "はじめまして", "です。"],
-  start: ["start", "開始", "よろしく"],
-  reach: ["reach", "リーチ"],
-  pon: ["pon", "ポン"],
-  chi: ["chi", "チー"],
-  kan: ["kan", "カン", "槓"],
-  win: ["win", "勝っ", "やった", "ロン", "ツモ", "あがり", "上がり"],
-  ron: ["ron", "ロン"],
-  tsumo: ["tsumo", "ツモ", "勝っ", "やった"],
-  lose: ["lose", "負け"],
-  draw: ["draw", "流局"],
-  yaku: ["yaku", "役"],
-  turn_hurry: ["hurry", "考える", "急い", "早く"],
+type VoiceEvent =
+  | "preview"
+  | "start"
+  | "reach"
+  | "pon"
+  | "chi"
+  | "kan"
+  | "win"
+  | "ron"
+  | "tsumo"
+  | "lose"
+  | "draw"
+  | "yaku"
+  | "turn_hurry"
+  | "repeat_discard";
+
+type VoiceClip = {
+  relativePath: string;
+  topFolder: string;
+  fileName: string;
+};
+
+const CHARACTER_ALIAS: Record<string, string> = {
+  ojousama: "zundamon",
+  yankee: "robo",
+};
+
+const EVENT_FOLDERS: Record<VoiceEvent, string[]> = {
+  preview: ["", "雑談"],
+  start: ["対戦開始", "雑談"],
+  reach: ["リーチ"],
+  pon: ["ポン"],
+  chi: ["チー"],
+  kan: ["カン"],
+  win: ["最終結果１位", "雑談"],
+  ron: ["ロン"],
+  tsumo: ["ツモ"],
+  lose: ["CPUに上がられたとき", "雑談"],
+  draw: ["雑談"],
+  yaku: ["雑談"],
+  turn_hurry: ["思考中", "雑談"],
+  repeat_discard: ["捨て牌のかぶり", "捨て牌同じ"],
+};
+
+const EVENT_FILENAME_KEYWORDS: Record<VoiceEvent, string[]> = {
+  preview: ["試聴", "自己紹介"],
+  start: ["開始", "対局"],
+  reach: ["リーチ"],
+  pon: ["ポン"],
+  chi: ["チー"],
+  kan: ["カン"],
+  win: ["勝っ", "やった", "1位", "最終"],
+  ron: ["ロン"],
+  tsumo: ["ツモ"],
+  lose: ["負け", "やめる", "高い"],
+  draw: ["流局"],
+  yaku: ["役"],
+  turn_hurry: ["考", "急", "早"],
+  repeat_discard: ["同一", "パターン", "二度", "統一", "錯乱"],
 };
 
 function randomPick<T>(items: T[]): T | null {
@@ -26,39 +70,76 @@ function randomPick<T>(items: T[]): T | null {
   return items[Math.floor(Math.random() * items.length)];
 }
 
-function listVoiceFiles(character: string): { files: string[]; basePath: string } {
-  const characterDir = path.join(VOICE_ROOT_DIR, character);
-  const baseDir = fs.existsSync(characterDir) ? characterDir : VOICE_ROOT_DIR;
+function collectClips(baseDir: string, currentDir: string): VoiceClip[] {
+  const clips: VoiceClip[] = [];
+  const entries = fs.readdirSync(currentDir, { withFileTypes: true });
 
-  const files = fs
-    .readdirSync(baseDir, { withFileTypes: true })
-    .filter((entry) => entry.isFile())
-    .map((entry) => entry.name);
+  for (const entry of entries) {
+    const fullPath = path.join(currentDir, entry.name);
+    if (entry.isDirectory()) {
+      clips.push(...collectClips(baseDir, fullPath));
+      continue;
+    }
+    if (!entry.isFile()) continue;
 
-  const basePath = baseDir === characterDir ? `/user-voices/${character}` : "/user-voices";
-  return { files, basePath };
-}
-
-function pickClip(fileNames: string[], event: string): string | null {
-  const lowered = fileNames.map((name) => ({ name, lower: name.toLowerCase() }));
-
-  if (event === "repeat_discard") {
-    const candidates = lowered
-      .filter((entry) => REPEAT_DISCARD_QUOTES.some((keyword) => entry.name.includes(keyword)))
-      .map((entry) => entry.name);
-    return randomPick(candidates);
+    const relativePath = path.relative(baseDir, fullPath);
+    const parts = relativePath.split(path.sep);
+    const topFolder = parts.length > 1 ? parts[0] : "";
+    clips.push({ relativePath, topFolder, fileName: entry.name });
   }
 
-  const keywords = EVENT_KEYWORDS[event];
-  if (!keywords) return null;
+  return clips;
+}
 
-  const candidates = lowered
-    .filter((entry) =>
-      keywords.some((keyword) => entry.lower.includes(keyword.toLowerCase())),
-    )
-    .map((entry) => entry.name);
+function listVoiceFiles(character: string): { clips: VoiceClip[]; basePath: string } {
+  const mappedCharacter = CHARACTER_ALIAS[character] ?? character;
+  const characterDir = path.join(VOICE_ROOT_DIR, mappedCharacter);
 
-  return randomPick(candidates);
+  if (fs.existsSync(characterDir)) {
+    return {
+      clips: collectClips(characterDir, characterDir),
+      basePath: `/user-voices/${encodeURIComponent(mappedCharacter)}`,
+    };
+  }
+
+  return {
+    clips: collectClips(VOICE_ROOT_DIR, VOICE_ROOT_DIR),
+    basePath: "/user-voices",
+  };
+}
+
+function toPublicUrl(basePath: string, relativePath: string): string {
+  const encodedPath = relativePath
+    .split(path.sep)
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+  return `${basePath}/${encodedPath}`;
+}
+
+function pickClip(clips: VoiceClip[], event: VoiceEvent): VoiceClip | null {
+  const folders = EVENT_FOLDERS[event];
+  const folderCandidates = clips.filter((clip) => folders.includes(clip.topFolder));
+  const fromFolder = randomPick(folderCandidates);
+  if (fromFolder) return fromFolder;
+
+  const keywords = EVENT_FILENAME_KEYWORDS[event];
+  const fileCandidates = clips.filter((clip) =>
+    keywords.some((keyword) => clip.fileName.includes(keyword)),
+  );
+  const fromFileName = randomPick(fileCandidates);
+  if (fromFileName) return fromFileName;
+
+  if (event !== "preview") {
+    const chatFallback = clips.filter((clip) => clip.topFolder === "雑談");
+    const fromChat = randomPick(chatFallback);
+    if (fromChat) return fromChat;
+  }
+
+  return randomPick(clips);
+}
+
+function isVoiceEvent(event: string): event is VoiceEvent {
+  return event in EVENT_FOLDERS;
 }
 
 export async function GET(request: NextRequest) {
@@ -71,6 +152,9 @@ export async function GET(request: NextRequest) {
       { status: 400 },
     );
   }
+  if (!isVoiceEvent(event)) {
+    return NextResponse.json({ error: `Unknown event: ${event}` }, { status: 400 });
+  }
 
   if (!fs.existsSync(VOICE_ROOT_DIR)) {
     return NextResponse.json(
@@ -79,11 +163,11 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const { files, basePath } = listVoiceFiles(character);
-  const clip = pickClip(files, event);
+  const { clips, basePath } = listVoiceFiles(character);
+  const clip = pickClip(clips, event);
   if (!clip) return NextResponse.json({ url: null });
 
   return NextResponse.json({
-    url: `${basePath}/${encodeURIComponent(clip)}`,
+    url: toPublicUrl(basePath, clip.relativePath),
   });
 }

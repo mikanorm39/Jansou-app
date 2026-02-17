@@ -20,11 +20,11 @@ export const characters: VoiceCharacter[] = [
   },
   {
     id: "yankee",
-    name: "ヤンキー",
-    description: "勢いで押し切る熱血実況",
+    name: "カイジR",
+    description: "カイジR風の圧がある実況",
     model: {
-      gptModelPath: "models/yankee/gpt.ckpt",
-      sovitsModelPath: "models/yankee/sovits.pth",
+      gptModelPath: "models/robo/gpt.ckpt",
+      sovitsModelPath: "models/robo/sovits.pth",
     },
   },
   {
