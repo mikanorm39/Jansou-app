@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -23,27 +23,46 @@ type VoiceEvent =
 type VoiceClip = {
   relativePath: string;
   topFolder: string;
+  fileName: string;
 };
 
 const CHARACTER_ALIAS: Record<string, string> = {
   ojousama: "zundamon",
+  yankee: "robo",
 };
 
 const EVENT_FOLDERS: Record<VoiceEvent, string[]> = {
   preview: ["", "雑談"],
-  start: ["対戦開始"],
+  start: ["対戦開始", "雑談"],
   reach: ["リーチ"],
   pon: ["ポン"],
   chi: ["チー"],
   kan: ["カン"],
-  win: ["最終結果１位"],
+  win: ["最終結果１位", "雑談"],
   ron: ["ロン"],
   tsumo: ["ツモ"],
-  lose: ["CPUに上がられたとき"],
+  lose: ["CPUに上がられたとき", "雑談"],
   draw: ["雑談"],
   yaku: ["雑談"],
-  turn_hurry: ["思考中"],
-  repeat_discard: ["捨て牌のかぶり"],
+  turn_hurry: ["思考中", "雑談"],
+  repeat_discard: ["捨て牌のかぶり", "捨て牌同じ"],
+};
+
+const EVENT_FILENAME_KEYWORDS: Record<VoiceEvent, string[]> = {
+  preview: ["試聴", "自己紹介"],
+  start: ["開始", "対局"],
+  reach: ["リーチ"],
+  pon: ["ポン"],
+  chi: ["チー"],
+  kan: ["カン"],
+  win: ["勝っ", "やった", "1位", "最終"],
+  ron: ["ロン"],
+  tsumo: ["ツモ"],
+  lose: ["負け", "やめる", "高い"],
+  draw: ["流局"],
+  yaku: ["役"],
+  turn_hurry: ["考", "急", "早"],
+  repeat_discard: ["同一", "パターン", "二度", "統一", "錯乱"],
 };
 
 function randomPick<T>(items: T[]): T | null {
@@ -66,7 +85,7 @@ function collectClips(baseDir: string, currentDir: string): VoiceClip[] {
     const relativePath = path.relative(baseDir, fullPath);
     const parts = relativePath.split(path.sep);
     const topFolder = parts.length > 1 ? parts[0] : "";
-    clips.push({ relativePath, topFolder });
+    clips.push({ relativePath, topFolder, fileName: entry.name });
   }
 
   return clips;
@@ -99,14 +118,21 @@ function toPublicUrl(basePath: string, relativePath: string): string {
 
 function pickClip(clips: VoiceClip[], event: VoiceEvent): VoiceClip | null {
   const folders = EVENT_FOLDERS[event];
-  const inEventFolder = clips.filter((clip) => folders.includes(clip.topFolder));
-  const pickedByFolder = randomPick(inEventFolder);
-  if (pickedByFolder) return pickedByFolder;
+  const folderCandidates = clips.filter((clip) => folders.includes(clip.topFolder));
+  const fromFolder = randomPick(folderCandidates);
+  if (fromFolder) return fromFolder;
+
+  const keywords = EVENT_FILENAME_KEYWORDS[event];
+  const fileCandidates = clips.filter((clip) =>
+    keywords.some((keyword) => clip.fileName.includes(keyword)),
+  );
+  const fromFileName = randomPick(fileCandidates);
+  if (fromFileName) return fromFileName;
 
   if (event !== "preview") {
-    const fallbackChat = clips.filter((clip) => clip.topFolder === "雑談");
-    const pickedChat = randomPick(fallbackChat);
-    if (pickedChat) return pickedChat;
+    const chatFallback = clips.filter((clip) => clip.topFolder === "雑談");
+    const fromChat = randomPick(chatFallback);
+    if (fromChat) return fromChat;
   }
 
   return randomPick(clips);
