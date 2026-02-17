@@ -117,7 +117,55 @@ function toPublicUrl(basePath: string, relativePath: string): string {
   return `${basePath}/${encodedPath}`;
 }
 
-function pickClip(clips: VoiceClip[], event: VoiceEvent): VoiceClip | null {
+function unique(values: string[]): string[] {
+  return [...new Set(values)];
+}
+
+function yakuKeywords(yakuName: string): string[] {
+  const compact = yakuName.replace(/\s+/g, "");
+  const keywords: string[] = [compact];
+
+  if (compact.includes("二色同順")) {
+    keywords.push("にしょく同順", "二色同順");
+  }
+  if (compact.includes("ドラ隣")) {
+    keywords.push("ドラ隣");
+  }
+  if (compact.includes("混全帯幺九")) {
+    keywords.push("不純チャン", "チャン");
+  }
+  if (compact.includes("東西南北")) {
+    keywords.push("東", "西", "南", "北");
+  }
+  if (compact.includes("無限立直") || compact.includes("無限リーチ")) {
+    keywords.push("無限リーチ", "無限立直", "リーチ");
+  }
+  if (compact.includes("途中まで通貫") || compact.includes("一気通貫")) {
+    keywords.push("途中まで通貫", "通貫");
+  }
+
+  return unique(keywords);
+}
+
+function pickYakuClip(clips: VoiceClip[], yakuName: string): VoiceClip | null {
+  const yakuClips = clips.filter((clip) => clip.topFolder === "追加役");
+  if (yakuClips.length === 0) return null;
+
+  const keywords = yakuKeywords(yakuName);
+  const matches = yakuClips.filter((clip) =>
+    keywords.some((keyword) => clip.fileName.includes(keyword)),
+  );
+
+  return randomPick(matches);
+}
+
+function pickClip(clips: VoiceClip[], event: VoiceEvent, yakuName?: string | null): VoiceClip | null {
+  if (event === "yaku" && yakuName) {
+    const yakuClip = pickYakuClip(clips, yakuName);
+    if (yakuClip) return yakuClip;
+    return null;
+  }
+
   const folders = EVENT_FOLDERS[event];
   const folderCandidates = clips.filter((clip) => folders.includes(clip.topFolder));
   const keywords = EVENT_FILENAME_KEYWORDS[event];
@@ -151,6 +199,7 @@ function isVoiceEvent(event: string): event is VoiceEvent {
 export async function GET(request: NextRequest) {
   const character = request.nextUrl.searchParams.get("character");
   const event = request.nextUrl.searchParams.get("event");
+  const yakuName = request.nextUrl.searchParams.get("yaku");
 
   if (!character || !event) {
     return NextResponse.json(
@@ -170,7 +219,7 @@ export async function GET(request: NextRequest) {
   }
 
   const { clips, basePath } = listVoiceFiles(character);
-  const clip = pickClip(clips, event);
+  const clip = pickClip(clips, event, yakuName);
   if (!clip) return NextResponse.json({ url: null });
 
   return NextResponse.json({

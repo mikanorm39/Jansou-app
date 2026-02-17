@@ -29,7 +29,7 @@ export const characters: VoiceCharacter[] = [
   },
   {
     id: "datsuryoku",
-    name: "脱力系",
+    name: "蒼",
     description: "ゆるく淡々とした実況",
     model: {
       gptModelPath: "models/datsuryoku/gpt.ckpt",

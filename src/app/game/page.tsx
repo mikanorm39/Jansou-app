@@ -843,6 +843,13 @@ export default function GamePage() {
     });
   };
 
+  const playYakuCommentaryInOrder = async (yakuNames: string[]) => {
+    const deduped = [...new Set(yakuNames)].filter((name) => name !== "役なし");
+    for (const yakuName of deduped) {
+      await playCommentary("yaku", selectedChar, { yakuName });
+    }
+  };
+
   const scheduleCpuTurn = () => {
     if (cpuTimerRef.current !== null) {
       window.clearTimeout(cpuTimerRef.current);
@@ -1032,22 +1039,26 @@ export default function GamePage() {
 
   const onTsumo = async () => {
     if (!canTsumo) return;
+    let yakuNames: string[] = [];
 
     setState((prev) => {
       const next = cloneState(prev);
-      return settleWin(next, next.userWind, true, undefined, fullHand(next.players[next.userWind]), {
+      const settled = settleWin(next, next.userWind, true, undefined, fullHand(next.players[next.userWind]), {
         winningTile: next.players[next.userWind].drawnTile ?? undefined,
         isHaitei: next.wall.length === 0,
         isRinshan: next.players[next.userWind].rinshanReady,
       });
+      yakuNames = settled.winner?.yaku ?? [];
+      return settled;
     });
 
     await playCommentary("tsumo", selectedChar);
-    await playCommentary("yaku", selectedChar);
+    await playYakuCommentaryInOrder(yakuNames);
   };
 
   const onRon = async () => {
     if (!state.prompt?.canRon || state.winner || state.drawReason) return;
+    let yakuNames: string[] = [];
 
     setState((prev) => {
       const prompt = prev.prompt;
@@ -1056,14 +1067,16 @@ export default function GamePage() {
       const next = cloneState(prev);
       const winningTiles = [...next.players[next.userWind].hand, prompt.tile];
       next.prompt = null;
-      return settleWin(next, next.userWind, false, prompt.from, winningTiles, {
+      const settled = settleWin(next, next.userWind, false, prompt.from, winningTiles, {
         winningTile: prompt.tile,
         isHoutei: next.wall.length === 0,
       });
+      yakuNames = settled.winner?.yaku ?? [];
+      return settled;
     });
 
     await playCommentary("ron", selectedChar);
-    await playCommentary("yaku", selectedChar);
+    await playYakuCommentaryInOrder(yakuNames);
   };
 
   const onPon = async () => {
