@@ -29,40 +29,41 @@ type VoiceClip = {
 const CHARACTER_ALIAS: Record<string, string> = {
   ojousama: "zundamon",
   yankee: "robo",
+  datsuryoku: "boy",
 };
 
 const EVENT_FOLDERS: Record<VoiceEvent, string[]> = {
   preview: ["", "雑談"],
-  start: ["対戦開始", "雑談"],
+  start: ["対戦開始", "雑談", ""],
   reach: ["リーチ"],
   pon: ["ポン"],
   chi: ["チー"],
   kan: ["カン"],
-  win: ["最終結果１位", "雑談"],
+  win: ["最終結果１位", "雑談", ""],
   ron: ["ロン"],
   tsumo: ["ツモ"],
-  lose: ["CPUに上がられたとき", "雑談"],
+  lose: ["CPUに上がられたとき", "雑談", ""],
   draw: ["雑談"],
-  yaku: ["雑談"],
+  yaku: ["雑談", "追加役"],
   turn_hurry: ["思考中", "雑談"],
   repeat_discard: ["捨て牌のかぶり", "捨て牌同じ"],
 };
 
 const EVENT_FILENAME_KEYWORDS: Record<VoiceEvent, string[]> = {
   preview: ["試聴", "自己紹介"],
-  start: ["開始", "対局"],
+  start: ["開始", "対局", "初め", "始め"],
   reach: ["リーチ"],
   pon: ["ポン"],
   chi: ["チー"],
   kan: ["カン"],
-  win: ["勝っ", "やった", "1位", "最終"],
+  win: ["勝っ", "やった", "1位", "最終", "勝ちセリフ"],
   ron: ["ロン"],
   tsumo: ["ツモ"],
-  lose: ["負け", "やめる", "高い"],
+  lose: ["負け", "やめる", "高い", "負けセリフ"],
   draw: ["流局"],
-  yaku: ["役"],
+  yaku: ["役", "ドラ", "同順", "チャン", "通貫", "東", "西", "南", "北"],
   turn_hurry: ["考", "急", "早"],
-  repeat_discard: ["同一", "パターン", "二度", "統一", "錯乱"],
+  repeat_discard: ["同一", "パターン", "二度", "統一", "錯乱", "同じ"],
 };
 
 function randomPick<T>(items: T[]): T | null {
@@ -119,15 +120,20 @@ function toPublicUrl(basePath: string, relativePath: string): string {
 function pickClip(clips: VoiceClip[], event: VoiceEvent): VoiceClip | null {
   const folders = EVENT_FOLDERS[event];
   const folderCandidates = clips.filter((clip) => folders.includes(clip.topFolder));
-  const fromFolder = randomPick(folderCandidates);
-  if (fromFolder) return fromFolder;
-
   const keywords = EVENT_FILENAME_KEYWORDS[event];
   const fileCandidates = clips.filter((clip) =>
     keywords.some((keyword) => clip.fileName.includes(keyword)),
   );
+
+  const inPreferredFolders = fileCandidates.filter((clip) => folders.includes(clip.topFolder));
+  const fromPreferredFolders = randomPick(inPreferredFolders);
+  if (fromPreferredFolders) return fromPreferredFolders;
+
   const fromFileName = randomPick(fileCandidates);
   if (fromFileName) return fromFileName;
+
+  const fromFolder = randomPick(folderCandidates);
+  if (fromFolder) return fromFolder;
 
   if (event !== "preview") {
     const chatFallback = clips.filter((clip) => clip.topFolder === "雑談");
