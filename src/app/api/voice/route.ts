@@ -31,6 +31,8 @@ const CHARACTER_ALIAS: Record<string, string> = {
   ojousama: "zundamon",
   yankee: "robo",
   datsuryoku: "boy",
+  mochiko: "girl",
+  nimochiko: "girl",
 };
 
 const EVENT_FOLDERS: Record<VoiceEvent, string[]> = {
@@ -107,22 +109,20 @@ function collectClips(baseDir: string, currentDir: string): VoiceClip[] {
   return clips;
 }
 
-function listVoiceFiles(character: string): { clips: VoiceClip[]; basePath: string; characterKey: string } {
+function listVoiceFiles(
+  character: string,
+): { clips: VoiceClip[]; basePath: string; characterKey: string } | null {
   const mappedCharacter = CHARACTER_ALIAS[character] ?? character;
   const characterDir = path.join(VOICE_ROOT_DIR, mappedCharacter);
 
-  if (fs.existsSync(characterDir)) {
-    return {
-      clips: collectClips(characterDir, characterDir),
-      basePath: `/user-voices/${encodeURIComponent(mappedCharacter)}`,
-      characterKey: mappedCharacter,
-    };
+  if (!fs.existsSync(characterDir)) {
+    return null;
   }
 
   return {
-    clips: collectClips(VOICE_ROOT_DIR, VOICE_ROOT_DIR),
-    basePath: "/user-voices",
-    characterKey: "all",
+    clips: collectClips(characterDir, characterDir),
+    basePath: `/user-voices/${encodeURIComponent(mappedCharacter)}`,
+    characterKey: mappedCharacter,
   };
 }
 
@@ -266,7 +266,10 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const { clips, basePath, characterKey } = listVoiceFiles(character);
+  const listed = listVoiceFiles(character);
+  if (!listed) return NextResponse.json({ url: null });
+
+  const { clips, basePath, characterKey } = listed;
   const clip = pickClip(clips, event, characterKey, yakuName);
   if (!clip) return NextResponse.json({ url: null });
 
