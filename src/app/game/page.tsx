@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Tile } from "../../components/Tile";
 import type { PlayerWind, Tile as TileType } from "../../../types/mahjong";
 import { dealInitialHands, sortTiles } from "../../../lib/shuffler";
@@ -120,12 +121,6 @@ function rotateScores(scores: Record<PlayerWind, number>): Record<PlayerWind, nu
     south: scores.east,
     west: scores.south,
   };
-}
-
-function getInitialCharacter(): string {
-  if (typeof window === "undefined") return "ojousama";
-  const params = new URLSearchParams(window.location.search);
-  return params.get("char") ?? "ojousama";
 }
 
 function cloneState(state: GameState): GameState {
@@ -486,7 +481,8 @@ function dealerHasMenzenTsumo(state: GameState): boolean {
 }
 
 export default function GamePage() {
-  const [selectedChar] = useState(getInitialCharacter);
+  const searchParams = useSearchParams();
+  const selectedChar = searchParams.get("char") ?? "ojousama";
   const initial = useMemo(() => createInitialState(), []);
   const [state, setState] = useState<GameState>(initial);
   const [scoreFlash, setScoreFlash] = useState(true);
