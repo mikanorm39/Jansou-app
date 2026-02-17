@@ -38,6 +38,7 @@ type HandPattern = {
 
 export type HandContext = {
   isReach: boolean;
+  isIppatsu: boolean;
   doraIndicator: Tile;
   isMenzen: boolean;
   byTsumo: boolean;
@@ -322,6 +323,11 @@ function calculateHandResult(tiles: Tile[], context: HandContext): HandResult {
 
   if (context.isReach) {
     yaku.push("リーチ");
+    han += 1;
+  }
+
+  if (context.isIppatsu) {
+    yaku.push("一発");
     han += 1;
   }
 
