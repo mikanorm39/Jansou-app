@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
 import { Tile } from "../../components/Tile";
 import type { PlayerWind, Tile as TileType } from "../../../types/mahjong";
 import { dealInitialHands, sortTiles } from "../../../lib/shuffler";
@@ -672,8 +671,11 @@ function dealerHasMenzenTsumo(state: GameState): boolean {
 }
 
 export default function GamePage() {
-  const searchParams = useSearchParams();
-  const selectedChar = searchParams.get("char") ?? "ojousama";
+  const [selectedChar, setSelectedChar] = useState("ojousama");
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    setSelectedChar(params.get("char") ?? "ojousama");
+  }, []);
   const initial = useMemo(() => createInitialState(), []);
   const [state, setState] = useState<GameState>(initial);
   const [scoreFlash, setScoreFlash] = useState(true);
@@ -927,10 +929,11 @@ export default function GamePage() {
     !me.ippatsuPrimed &&
     canDeclareReach(meFullHand, false);
   const canTsumo = !state.prompt && !state.winner && !state.drawReason && state.turn === state.userWind && isWinningHand(meFullHand, 4 - me.calledMelds.length);
+  const showReachAction = canReach && !canTsumo && !state.prompt?.canRon;
   const concealedKans = !state.prompt && !state.winner && !state.drawReason && state.turn === state.userWind ? concealedKanOptions(meFullHand) : [];
   const canConcealedWindSetKan = !state.prompt && !state.winner && !state.drawReason && state.turn === state.userWind && canConcealedKanByWindSet(meFullHand);
   const isCallPromptVisible = Boolean(
-    canReach ||
+    showReachAction ||
     concealedKans.length > 0 ||
     canConcealedWindSetKan ||
     state.prompt?.canPon ||
@@ -1384,7 +1387,7 @@ export default function GamePage() {
                 チー {opt.join("-")}
               </button>
             ))}
-            {canReach && (
+            {showReachAction && (
               <button type="button" onClick={onReach} className="rounded-md bg-rose-600 px-4 py-2 font-bold hover:bg-rose-500">
                 リーチ
               </button>
