@@ -16,7 +16,11 @@ import {
   evaluateHandTiles,
   isWinningHand,
 } from "../../../lib/mahjong";
-import { playCommentary } from "../../../lib/voiceService";
+import {
+  getLastVoiceActivityAt,
+  isVoicePlaybackBusy,
+  playCommentary,
+} from "../../../lib/voiceService";
 import { characters } from "../../../data/characters";
 
 type MeldType = "pon" | "chi" | "kan";
@@ -693,6 +697,7 @@ export default function GamePage() {
   const winSoundRef = useRef<HTMLAudioElement | null>(null);
   const callPromptVisibleRef = useRef(false);
   const winPromptVisibleRef = useRef(false);
+  const idleChatPendingRef = useRef(false);
 
   useEffect(() => {
     if (!showYakuGuide) return;
@@ -753,6 +758,27 @@ export default function GamePage() {
       }
     };
   }, [state.turn, state.prompt, state.winner, state.drawReason, selectedChar]);
+
+  useEffect(() => {
+    const inMatch = !state.gameOver && !state.winner && !state.drawReason;
+    if (!inMatch) return;
+
+    const timer = window.setInterval(() => {
+      if (idleChatPendingRef.current) return;
+      if (isVoicePlaybackBusy()) return;
+      if (Date.now() - getLastVoiceActivityAt() < 10000) return;
+
+      idleChatPendingRef.current = true;
+      void playCommentary("idle_chat", selectedChar).finally(() => {
+        idleChatPendingRef.current = false;
+      });
+    }, 1000);
+
+    return () => {
+      window.clearInterval(timer);
+      idleChatPendingRef.current = false;
+    };
+  }, [state.gameOver, state.winner, state.drawReason, selectedChar]);
 
   useEffect(() => {
     const audio = new Audio("/sounds/notanomori_200812290000000026.wav");

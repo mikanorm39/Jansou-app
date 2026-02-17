@@ -18,7 +18,8 @@ type VoiceEvent =
   | "draw"
   | "yaku"
   | "turn_hurry"
-  | "repeat_discard";
+  | "repeat_discard"
+  | "idle_chat";
 
 type VoiceClip = {
   relativePath: string;
@@ -47,6 +48,7 @@ const EVENT_FOLDERS: Record<VoiceEvent, string[]> = {
   yaku: ["雑談", "追加役"],
   turn_hurry: ["思考中", "雑談"],
   repeat_discard: ["捨て牌のかぶり", "捨て牌同じ"],
+  idle_chat: ["雑談"],
 };
 
 const EVENT_FILENAME_KEYWORDS: Record<VoiceEvent, string[]> = {
@@ -64,11 +66,24 @@ const EVENT_FILENAME_KEYWORDS: Record<VoiceEvent, string[]> = {
   yaku: ["役", "ドラ", "同順", "チャン", "通貫", "東", "西", "南", "北"],
   turn_hurry: ["考", "急", "早"],
   repeat_discard: ["同一", "パターン", "二度", "統一", "錯乱", "同じ"],
+  idle_chat: [],
 };
+
+const idleChatRemainingByCharacter = new Map<string, string[]>();
+const idleChatLastByCharacter = new Map<string, string>();
 
 function randomPick<T>(items: T[]): T | null {
   if (items.length === 0) return null;
   return items[Math.floor(Math.random() * items.length)];
+}
+
+function shuffled<T>(items: T[]): T[] {
+  const next = [...items];
+  for (let i = next.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [next[i], next[j]] = [next[j], next[i]];
+  }
+  return next;
 }
 
 function collectClips(baseDir: string, currentDir: string): VoiceClip[] {
@@ -92,7 +107,7 @@ function collectClips(baseDir: string, currentDir: string): VoiceClip[] {
   return clips;
 }
 
-function listVoiceFiles(character: string): { clips: VoiceClip[]; basePath: string } {
+function listVoiceFiles(character: string): { clips: VoiceClip[]; basePath: string; characterKey: string } {
   const mappedCharacter = CHARACTER_ALIAS[character] ?? character;
   const characterDir = path.join(VOICE_ROOT_DIR, mappedCharacter);
 
@@ -100,12 +115,14 @@ function listVoiceFiles(character: string): { clips: VoiceClip[]; basePath: stri
     return {
       clips: collectClips(characterDir, characterDir),
       basePath: `/user-voices/${encodeURIComponent(mappedCharacter)}`,
+      characterKey: mappedCharacter,
     };
   }
 
   return {
     clips: collectClips(VOICE_ROOT_DIR, VOICE_ROOT_DIR),
     basePath: "/user-voices",
+    characterKey: "all",
   };
 }
 
@@ -159,11 +176,42 @@ function pickYakuClip(clips: VoiceClip[], yakuName: string): VoiceClip | null {
   return randomPick(matches);
 }
 
-function pickClip(clips: VoiceClip[], event: VoiceEvent, yakuName?: string | null): VoiceClip | null {
+function pickIdleChatClip(clips: VoiceClip[], characterKey: string): VoiceClip | null {
+  const chatClips = clips.filter((clip) => clip.topFolder === "雑談");
+  if (chatClips.length === 0) return null;
+
+  const allPaths = chatClips.map((clip) => clip.relativePath);
+  const allPathSet = new Set(allPaths);
+  const currentRemaining = idleChatRemainingByCharacter.get(characterKey) ?? [];
+  const filteredRemaining = currentRemaining.filter((relativePath) => allPathSet.has(relativePath));
+
+  let remaining = filteredRemaining;
+  if (remaining.length === 0) {
+    const lastPlayed = idleChatLastByCharacter.get(characterKey);
+    const refillSource = allPaths.filter((relativePath) => relativePath !== lastPlayed);
+    remaining = shuffled(refillSource.length > 0 ? refillSource : allPaths);
+  }
+
+  const nextRelativePath = remaining[0];
+  idleChatRemainingByCharacter.set(characterKey, remaining.slice(1));
+  idleChatLastByCharacter.set(characterKey, nextRelativePath);
+
+  return chatClips.find((clip) => clip.relativePath === nextRelativePath) ?? null;
+}
+
+function pickClip(
+  clips: VoiceClip[],
+  event: VoiceEvent,
+  characterKey: string,
+  yakuName?: string | null,
+): VoiceClip | null {
   if (event === "yaku" && yakuName) {
     const yakuClip = pickYakuClip(clips, yakuName);
     if (yakuClip) return yakuClip;
     return null;
+  }
+  if (event === "idle_chat") {
+    return pickIdleChatClip(clips, characterKey);
   }
 
   const folders = EVENT_FOLDERS[event];
@@ -218,8 +266,8 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const { clips, basePath } = listVoiceFiles(character);
-  const clip = pickClip(clips, event, yakuName);
+  const { clips, basePath, characterKey } = listVoiceFiles(character);
+  const clip = pickClip(clips, event, characterKey, yakuName);
   if (!clip) return NextResponse.json({ url: null });
 
   return NextResponse.json({
