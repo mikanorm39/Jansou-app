@@ -93,6 +93,45 @@ type GameState = {
 const WINDS: PlayerWind[] = ["east", "south", "west"];
 const WIND_SET_TILES: TileType[] = ["z1", "z2", "z3", "z4"];
 const CPU_ACTION_DELAY_MS = 1000;
+const YAKU_GUIDE: Array<{ name: string; han: string; description: string }> = [
+  { name: "リーチ", han: "1翻", description: "門前でテンパイ宣言。" },
+  { name: "ダブル立直", han: "2翻", description: "第一巡で立直。" },
+  { name: "一発", han: "1翻", description: "立直後、1巡以内の和了。" },
+  { name: "門前ツモ", han: "1翻", description: "門前でツモ和了。" },
+  { name: "海底", han: "1翻", description: "最後のツモで和了。" },
+  { name: "河底", han: "1翻", description: "最後の捨て牌でロン和了。" },
+  { name: "嶺上開花", han: "1翻", description: "槓の後の嶺上牌で和了。" },
+  { name: "槍槓", han: "1翻", description: "相手の加槓牌をロン和了。" },
+  { name: "タンヤオ", han: "1翻", description: "1・9牌と字牌を含まない。" },
+  { name: "平和", han: "1翻", description: "門前のみ。順子4組+非役牌雀頭+両面待ち。" },
+  { name: "役牌", han: "1翻", description: "白/發/中の刻子。" },
+  { name: "一盃口", han: "1翻", description: "門前のみ。同一順子2組。" },
+  { name: "七対子", han: "2翻", description: "門前のみ。対子7組。" },
+  { name: "対々和", han: "2翻", description: "刻子/槓子のみで構成。" },
+  { name: "三暗刻", han: "2翻", description: "暗刻を3組含む。" },
+  { name: "二色同順", han: "1翻", description: "2つの色で同じ順子。" },
+  { name: "三色同順", han: "2翻/1翻", description: "萬子・筒子・索子で同じ順子。" },
+  { name: "一気通貫", han: "2翻/1翻", description: "同一色で123+456+789。" },
+  { name: "途中まで通貫", han: "1翻", description: "門前のみ。同一色で3つ離れた順子2組。" },
+  { name: "混全帯幺九", han: "2翻/1翻", description: "すべての面子と雀頭に么九牌を含む。" },
+  { name: "三色同刻", han: "2翻", description: "萬子・筒子・索子で同じ数字の刻子。" },
+  { name: "三槓子", han: "2翻", description: "槓子を3組含む。" },
+  { name: "小三元", han: "2翻", description: "三元牌のうち2組が刻子、1組が雀頭。" },
+  { name: "混老頭", han: "2翻", description: "1・9牌と字牌のみで構成。" },
+  { name: "東西南北", han: "1翻", description: "風牌4種の槓を達成。" },
+  { name: "ドラN", han: "N翻", description: "ドラ表示牌に対応する牌の枚数分。" },
+  { name: "ドラ隣N", han: "0.5N翻", description: "ドラの次の次の牌。1枚につき0.5翻。" },
+  { name: "無限立直xN", han: "特殊", description: "2回目以降の立直回数に応じる特殊加点。" },
+  { name: "役なし", han: "1翻扱い", description: "実装上、役がない場合の救済扱い。" },
+];
+const ORIGINAL_YAKU_GUIDE: Array<{ name: string; han: string; description: string }> = [
+  { name: "二色同順", han: "1翻", description: "2つの色で同じ順子。" },
+  { name: "途中まで通貫", han: "1翻", description: "門前のみ。同一色で3つ離れた順子2組。" },
+  { name: "不純全", han: "2翻/1翻", description: "混全帯幺九のオリジナル表記。" },
+  { name: "東西南北", han: "1翻", description: "風牌4種の槓を達成。" },
+  { name: "ドラ隣N", han: "0.5N翻", description: "ドラの次の次の牌。1枚につき0.5翻。" },
+  { name: "無限立直xN", han: "特殊", description: "2回目以降の立直回数に応じる特殊加点。" },
+];
 
 function nextWind(wind: PlayerWind): PlayerWind {
   if (wind === "east") return "south";
@@ -639,6 +678,7 @@ export default function GamePage() {
   const [state, setState] = useState<GameState>(initial);
   const [scoreFlash, setScoreFlash] = useState(true);
   const [cpuActing, setCpuActing] = useState(false);
+  const [showYakuGuide, setShowYakuGuide] = useState(false);
   const cpuTimerRef = useRef<number | null>(null);
   const hurryTimerRef = useRef<number | null>(null);
   const playedWinnerRef = useRef<string | null>(null);
@@ -651,6 +691,21 @@ export default function GamePage() {
   const winSoundRef = useRef<HTMLAudioElement | null>(null);
   const callPromptVisibleRef = useRef(false);
   const winPromptVisibleRef = useRef(false);
+
+  useEffect(() => {
+    if (!showYakuGuide) return;
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setShowYakuGuide(false);
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [showYakuGuide]);
 
   useEffect(() => {
     void playCommentary("start", selectedChar);
@@ -1226,9 +1281,66 @@ export default function GamePage() {
             </div>
           </div>
 
-
+          <div className="mt-3 flex justify-end">
+            <button
+              type="button"
+              onClick={() => setShowYakuGuide(true)}
+              className="rounded-md border border-cyan-300/60 bg-cyan-500/20 px-3 py-1.5 text-xs font-bold text-cyan-100 transition hover:bg-cyan-400/30"
+            >
+              役一覧
+            </button>
+          </div>
           {state.kyotaku > 0 && <div className="mt-2 h-2 w-full animate-pulse rounded bg-rose-500" />}
         </div>
+
+        {showYakuGuide && (
+          <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+            <div className="w-full max-w-2xl rounded-xl border border-cyan-300/60 bg-slate-900 p-4">
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="text-lg font-black text-cyan-100">役一覧</h2>
+                <button
+                  type="button"
+                  onClick={() => setShowYakuGuide(false)}
+                  className="rounded-md bg-slate-700 px-3 py-1 text-xs font-bold text-white transition hover:bg-slate-600"
+                >
+                  閉じる
+                </button>
+              </div>
+              <div className="max-h-[60vh] space-y-2 overflow-y-auto pr-1">
+                <p className="text-xs font-bold tracking-wide text-cyan-200">通常役</p>
+                {YAKU_GUIDE.map((entry) => (
+                  <div
+                    key={entry.name}
+                    className="rounded-md border border-slate-700 bg-black/35 px-3 py-2 text-sm"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-cyan-100">{entry.name}</span>
+                      <span className="text-xs font-bold text-amber-200">{entry.han}</span>
+                    </div>
+                    <p className="mt-1 text-xs text-slate-200">{entry.description}</p>
+                  </div>
+                ))}
+                <div className="pt-2">
+                  <p className="mb-2 text-xs font-bold tracking-wide text-fuchsia-200">オリジナル役</p>
+                  <div className="space-y-2">
+                    {ORIGINAL_YAKU_GUIDE.map((entry) => (
+                      <div
+                        key={`${entry.name}-original`}
+                        className="rounded-md border border-fuchsia-500/30 bg-fuchsia-950/20 px-3 py-2 text-sm"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-fuchsia-100">{entry.name}</span>
+                          <span className="text-xs font-bold text-amber-200">{entry.han}</span>
+                        </div>
+                        <p className="mt-1 text-xs text-slate-200">{entry.description}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="absolute left-1/2 top-[60%] -translate-x-1/2">
           <DiscardRiver tiles={me.discards} className="mx-auto rounded-lg bg-black/30 p-2" tileClass="h-9 w-7" />
