@@ -35,7 +35,7 @@ type PlayerState = {
   discards: TileType[];
   score: number;
   isReach: boolean;
-  isDoubleReach: boolean;
+  reachCount: number;
   ippatsuEligible: boolean;
   ippatsuPrimed: boolean;
   calledMelds: MeldState[];
@@ -82,8 +82,6 @@ type GameState = {
   kyotaku: number;
   lastDiscard: { from: PlayerWind; tile: TileType } | null;
   prompt: ActionPrompt | null;
-  rinshanEligible: PlayerWind | null;
-  chankanTarget: PlayerWind | null;
   winner: WinOverlay | null;
   drawReason: string | null;
   gameOver: GameOverOverlay | null;
@@ -139,6 +137,7 @@ function cloneState(state: GameState): GameState {
         drawnTile: state.players.east.drawnTile,
         discards: [...state.players.east.discards],
         calledMelds: state.players.east.calledMelds.map((m) => ({ ...m, tiles: [...m.tiles] })),
+        reachCount: state.players.east.reachCount,
         ippatsuEligible: state.players.east.ippatsuEligible,
         ippatsuPrimed: state.players.east.ippatsuPrimed,
       },
@@ -148,6 +147,7 @@ function cloneState(state: GameState): GameState {
         drawnTile: state.players.south.drawnTile,
         discards: [...state.players.south.discards],
         calledMelds: state.players.south.calledMelds.map((m) => ({ ...m, tiles: [...m.tiles] })),
+        reachCount: state.players.south.reachCount,
         ippatsuEligible: state.players.south.ippatsuEligible,
         ippatsuPrimed: state.players.south.ippatsuPrimed,
       },
@@ -157,6 +157,7 @@ function cloneState(state: GameState): GameState {
         drawnTile: state.players.west.drawnTile,
         discards: [...state.players.west.discards],
         calledMelds: state.players.west.calledMelds.map((m) => ({ ...m, tiles: [...m.tiles] })),
+        reachCount: state.players.west.reachCount,
         ippatsuEligible: state.players.west.ippatsuEligible,
         ippatsuPrimed: state.players.west.ippatsuPrimed,
       },
@@ -171,17 +172,42 @@ function clearIppatsu(state: GameState) {
   }
 }
 
-function isFirstGoAround(state: GameState): boolean {
-  if (WINDS.some((wind) => state.players[wind].calledMelds.length > 0)) return false;
-  return WINDS.every((wind) => state.players[wind].discards.length <= 1);
-}
+function applyInfiniteReachBonus(
+  deltas: Record<PlayerWind, number>,
+  winner: PlayerWind,
+  byTsumo: boolean,
+  loser: PlayerWind | undefined,
+  reachCount: number,
+) {
+  const multiplier = Math.max(0, reachCount - 1);
+  if (multiplier <= 0) return;
 
-function canDoubleReachNow(state: GameState, wind: PlayerWind): boolean {
-  return state.players[wind].discards.length === 0 && isFirstGoAround(state);
-}
+  if (byTsumo) {
+    if (winner === "east") {
+      const pay = 2000 * multiplier;
+      for (const wind of WINDS) {
+        if (wind === winner) continue;
+        deltas[wind] -= pay;
+        deltas[winner] += pay;
+      }
+      return;
+    }
 
-function isMenzenPlayer(player: PlayerState): boolean {
-  return player.calledMelds.every((meld) => meld.calledFrom === undefined);
+    const eastPay = 2000 * multiplier;
+    const childPay = 1000 * multiplier;
+    for (const wind of WINDS) {
+      if (wind === winner) continue;
+      const pay = wind === "east" ? eastPay : childPay;
+      deltas[wind] -= pay;
+      deltas[winner] += pay;
+    }
+    return;
+  }
+
+  if (!loser) return;
+  const ronPay = (winner === "east" ? 2000 : 1000) * multiplier;
+  deltas[loser] -= ronPay;
+  deltas[winner] += ronPay;
 }
 
 function drawTileIfNeeded(state: GameState, wind: PlayerWind): boolean {
@@ -223,31 +249,18 @@ function settleWin(
   loser: PlayerWind | undefined,
   winningTiles: TileType[],
 ): GameState {
-  const winnerState = state.players[winner];
-  const kanCount = winnerState.calledMelds.filter((meld) => meld.type === "kan").length;
-  const isHaitei = byTsumo && state.wall.length === 0;
-  const isHoutei = !byTsumo && state.wall.length === 0;
-  const isTenho = byTsumo && winner === "east" && winnerState.discards.length === 0 && isFirstGoAround(state);
-  const isChiho = byTsumo && winner !== "east" && winnerState.discards.length === 0 && isFirstGoAround(state);
-
   const result = calculateScoreResult({
     winner,
     loser,
     byTsumo,
     winningTiles,
     context: {
-      isReach: winnerState.isReach,
-      isDoubleReach: winnerState.isDoubleReach,
-      isIppatsu: winnerState.isReach && winnerState.ippatsuEligible,
-      isRinshan: byTsumo && state.rinshanEligible === winner,
-      isChankan: !byTsumo && state.chankanTarget === loser,
-      isHaitei,
-      isHoutei,
-      isTenho,
-      isChiho,
-      kanCount,
+      isReach: state.players[winner].isReach,
+      isIppatsu: state.players[winner].isReach && state.players[winner].ippatsuEligible,
       doraIndicator: state.doraIndicator,
-      isMenzen: isMenzenPlayer(winnerState),
+      isMenzen: state.players[winner].calledMelds.length === 0,
+      calledMelds: state.players[winner].calledMelds,
+      reachCount: state.players[winner].reachCount,
       seatWind: winner,
       roundWind: state.roundWind,
     },
@@ -272,6 +285,14 @@ function settleWin(
     deltas[winner] += state.kyotaku * 1000;
   }
 
+  applyInfiniteReachBonus(
+    deltas,
+    winner,
+    byTsumo,
+    loser,
+    state.players[winner].reachCount,
+  );
+
   for (const wind of WINDS) {
     state.players[wind].score += deltas[wind];
   }
@@ -290,7 +311,7 @@ function findCpuRonWinner(state: GameState, discardedTile: TileType): PlayerWind
   for (const wind of WINDS) {
     if (wind === state.userWind) continue;
     const cpu = state.players[wind];
-    if (isWinningHand([...fullHand(cpu), discardedTile])) {
+    if (isWinningHand([...fullHand(cpu), discardedTile], 4 - cpu.calledMelds.length)) {
       return wind;
     }
   }
@@ -299,7 +320,6 @@ function findCpuRonWinner(state: GameState, discardedTile: TileType): PlayerWind
 
 function resolveCpuTurn(state: GameState): GameState {
   const next = cloneState(state);
-  next.chankanTarget = null;
 
   if (next.turn === next.userWind || next.prompt || next.winner || next.drawReason) {
     return next;
@@ -309,7 +329,7 @@ function resolveCpuTurn(state: GameState): GameState {
   if (!drawTileIfNeeded(next, wind)) return next;
 
   const cpu = next.players[wind];
-  if (isWinningHand(fullHand(cpu))) {
+  if (isWinningHand(fullHand(cpu), 4 - cpu.calledMelds.length)) {
     return settleWin(next, wind, true, undefined, fullHand(cpu));
   }
 
@@ -324,11 +344,10 @@ function resolveCpuTurn(state: GameState): GameState {
   }
 
   const cpuFull = fullHand(cpu);
-  const reachDiscardIndex = isMenzenPlayer(cpu) ? findReachDiscardIndex(cpuFull, cpu.isReach) : null;
+  const reachDiscardIndex = cpu.calledMelds.length === 0 ? findReachDiscardIndex(cpuFull, false) : null;
   const discardIndex = reachDiscardIndex ?? chooseCpuDiscard(cpuFull, threateningDiscards);
   const tile = cpuFull[discardIndex];
-  const declaredReachThisDiscard = reachDiscardIndex !== null && !cpu.isReach;
-  const isDoubleReachThisDiscard = declaredReachThisDiscard && canDoubleReachNow(next, wind);
+  const declaredReachThisDiscard = reachDiscardIndex !== null;
   if (cpu.drawnTile && cpu.drawnTile === tile) {
     cpu.drawnTile = null;
   } else {
@@ -337,12 +356,15 @@ function resolveCpuTurn(state: GameState): GameState {
   }
   cpu.discards.push(tile);
   next.lastDiscard = { from: wind, tile };
-  if (reachDiscardIndex !== null && !cpu.isReach) {
-    cpu.isReach = true;
-    cpu.isDoubleReach = isDoubleReachThisDiscard;
+  if (reachDiscardIndex !== null) {
+    if (!cpu.isReach) {
+      cpu.score -= 1000;
+      next.kyotaku += 1;
+      cpu.isReach = true;
+    }
+    cpu.reachCount += 1;
     cpu.ippatsuPrimed = true;
-    cpu.score -= 1000;
-    next.kyotaku += 1;
+    cpu.ippatsuEligible = false;
   }
   if (cpu.ippatsuPrimed) {
     cpu.ippatsuPrimed = false;
@@ -352,7 +374,7 @@ function resolveCpuTurn(state: GameState): GameState {
   }
 
   const user = next.players[next.userWind];
-  const ron = isWinningHand([...user.hand, tile]);
+  const ron = isWinningHand([...user.hand, tile], 4 - user.calledMelds.length);
   const pon = canPon(user.hand, tile);
   const kan = canKan(user.hand, tile);
   const canChiFromThisPlayer = wind === prevWind(next.userWind);
@@ -437,9 +459,9 @@ function createInitialState(options?: {
 
   const state: GameState = {
     players: {
-      east: { hand: dealt.players.east, drawnTile: null, discards: [], score: scores.east, isReach: false, isDoubleReach: false, ippatsuEligible: false, ippatsuPrimed: false, calledMelds: [] },
-      south: { hand: dealt.players.south, drawnTile: null, discards: [], score: scores.south, isReach: false, isDoubleReach: false, ippatsuEligible: false, ippatsuPrimed: false, calledMelds: [] },
-      west: { hand: dealt.players.west, drawnTile: null, discards: [], score: scores.west, isReach: false, isDoubleReach: false, ippatsuEligible: false, ippatsuPrimed: false, calledMelds: [] },
+      east: { hand: dealt.players.east, drawnTile: null, discards: [], score: scores.east, isReach: false, reachCount: 0, ippatsuEligible: false, ippatsuPrimed: false, calledMelds: [] },
+      south: { hand: dealt.players.south, drawnTile: null, discards: [], score: scores.south, isReach: false, reachCount: 0, ippatsuEligible: false, ippatsuPrimed: false, calledMelds: [] },
+      west: { hand: dealt.players.west, drawnTile: null, discards: [], score: scores.west, isReach: false, reachCount: 0, ippatsuEligible: false, ippatsuPrimed: false, calledMelds: [] },
     },
     wall,
     turn: "east",
@@ -452,8 +474,6 @@ function createInitialState(options?: {
     kyotaku: options?.kyotaku ?? 0,
     lastDiscard: null,
     prompt: null,
-    rinshanEligible: null,
-    chankanTarget: null,
     winner: null,
     drawReason: null,
     gameOver: null,
@@ -507,17 +527,17 @@ function buildDrawYakuSummary(state: GameState): Array<{ wind: PlayerWind; yaku:
   return WINDS.map((wind) => {
     const player = state.players[wind];
     const tiles = fullHand(player);
-    if (!isWinningHand(tiles)) {
+    if (!isWinningHand(tiles, 4 - player.calledMelds.length)) {
       return { wind, yaku: ["未和了"] };
     }
 
     const result = evaluateHandTiles(tiles, {
       isReach: player.isReach,
-      isDoubleReach: player.isDoubleReach,
       isIppatsu: false,
       doraIndicator: state.doraIndicator,
-      isMenzen: isMenzenPlayer(player),
-      kanCount: player.calledMelds.filter((meld) => meld.type === "kan").length,
+      isMenzen: player.calledMelds.length === 0,
+      calledMelds: player.calledMelds,
+      reachCount: player.reachCount,
       byTsumo: false,
       seatWind: wind,
       roundWind: state.roundWind,
@@ -530,14 +550,14 @@ function buildDrawYakuSummary(state: GameState): Array<{ wind: PlayerWind; yaku:
 function dealerHasYaku(state: GameState): boolean {
   const dealer = state.players.east;
   const tiles = fullHand(dealer);
-  if (!isWinningHand(tiles)) return false;
+  if (!isWinningHand(tiles, 4 - dealer.calledMelds.length)) return false;
   const result = evaluateHandTiles(tiles, {
     isReach: dealer.isReach,
-    isDoubleReach: dealer.isDoubleReach,
     isIppatsu: false,
     doraIndicator: state.doraIndicator,
-    isMenzen: isMenzenPlayer(dealer),
-    kanCount: dealer.calledMelds.filter((meld) => meld.type === "kan").length,
+    isMenzen: dealer.calledMelds.length === 0,
+    calledMelds: dealer.calledMelds,
+    reachCount: dealer.reachCount,
     byTsumo: false,
     seatWind: "east",
     roundWind: state.roundWind,
@@ -547,16 +567,16 @@ function dealerHasYaku(state: GameState): boolean {
 
 function dealerHasMenzenTsumo(state: GameState): boolean {
   const dealer = state.players.east;
-  if (!isMenzenPlayer(dealer)) return false;
+  if (dealer.calledMelds.length > 0) return false;
   const tiles = fullHand(dealer);
-  if (!isWinningHand(tiles)) return false;
+  if (!isWinningHand(tiles, 4 - dealer.calledMelds.length)) return false;
   const result = evaluateHandTiles(tiles, {
     isReach: dealer.isReach,
-    isDoubleReach: dealer.isDoubleReach,
     isIppatsu: false,
     doraIndicator: state.doraIndicator,
     isMenzen: true,
-    kanCount: dealer.calledMelds.filter((meld) => meld.type === "kan").length,
+    calledMelds: dealer.calledMelds,
+    reachCount: dealer.reachCount,
     byTsumo: true,
     seatWind: "east",
     roundWind: state.roundWind,
@@ -750,13 +770,7 @@ export default function GamePage() {
 
     if (state.winner.winner !== state.userWind) {
       void playCommentary("lose", selectedChar);
-      return;
     }
-
-    void (async () => {
-      await playCommentary(state.winner?.byTsumo ? "tsumo" : "ron", selectedChar);
-      await playCommentary("yaku", selectedChar);
-    })();
   }, [state.winner, selectedChar]);
 
   useEffect(() => {
@@ -794,8 +808,8 @@ export default function GamePage() {
   const isTopTurn = state.turn === topWind && !state.prompt && !state.winner && !state.drawReason;
   const isLeftTurn = state.turn === leftWind && !state.prompt && !state.winner && !state.drawReason;
   const isUserTurn = state.turn === state.userWind && !state.prompt && !state.winner && !state.drawReason;
-  const canReach = !state.prompt && !state.winner && !state.drawReason && state.turn === state.userWind && isMenzenPlayer(me) && canDeclareReach(meFullHand, me.isReach);
-  const canTsumo = !state.prompt && !state.winner && !state.drawReason && state.turn === state.userWind && isWinningHand(meFullHand);
+  const canReach = !state.prompt && !state.winner && !state.drawReason && state.turn === state.userWind && me.calledMelds.length === 0 && canDeclareReach(meFullHand, false);
+  const canTsumo = !state.prompt && !state.winner && !state.drawReason && state.turn === state.userWind && isWinningHand(meFullHand, 4 - me.calledMelds.length);
   const concealedKans = !state.prompt && !state.winner && !state.drawReason && state.turn === state.userWind ? concealedKanOptions(meFullHand) : [];
   const isCallPromptVisible = Boolean(
     canReach ||
@@ -838,8 +852,6 @@ export default function GamePage() {
     }
     player.discards.push(tile);
     draft.lastDiscard = { from: draft.userWind, tile };
-    draft.rinshanEligible = null;
-    draft.chankanTarget = null;
     if (player.ippatsuPrimed) {
       player.ippatsuPrimed = false;
       player.ippatsuEligible = true;
@@ -865,13 +877,15 @@ export default function GamePage() {
     if (!canReach) return;
     setState((prev) => {
       const next = cloneState(prev);
-      const canDouble = canDoubleReachNow(next, next.userWind);
-      next.players[next.userWind].isReach = true;
-      next.players[next.userWind].isDoubleReach = canDouble;
-      next.players[next.userWind].ippatsuPrimed = true;
-      next.players[next.userWind].ippatsuEligible = false;
-      next.players[next.userWind].score -= 1000;
-      next.kyotaku += 1;
+      const player = next.players[next.userWind];
+      if (!player.isReach) {
+        player.score -= 1000;
+        next.kyotaku += 1;
+        player.isReach = true;
+      }
+      player.reachCount += 1;
+      player.ippatsuPrimed = true;
+      player.ippatsuEligible = false;
       return next;
     });
     await playCommentary("reach", selectedChar);
@@ -884,6 +898,9 @@ export default function GamePage() {
       const next = cloneState(prev);
       return settleWin(next, next.userWind, true, undefined, fullHand(next.players[next.userWind]));
     });
+
+    await playCommentary("tsumo", selectedChar);
+    await playCommentary("yaku", selectedChar);
   };
 
   const onRon = async () => {
@@ -898,6 +915,9 @@ export default function GamePage() {
       next.prompt = null;
       return settleWin(next, next.userWind, false, prompt.from, winningTiles);
     });
+
+    await playCommentary("ron", selectedChar);
+    await playCommentary("yaku", selectedChar);
   };
 
   const onPon = async () => {
@@ -918,8 +938,6 @@ export default function GamePage() {
         calledIndex: 0,
       });
       next.prompt = null;
-      next.rinshanEligible = null;
-      next.chankanTarget = null;
       next.turn = next.userWind;
       return next;
     });
@@ -946,8 +964,6 @@ export default function GamePage() {
       });
       next.prompt = null;
       next.turn = next.userWind;
-      next.rinshanEligible = next.userWind;
-      next.chankanTarget = null;
       drawTileIfNeeded(next, next.userWind);
       return next;
     });
@@ -975,8 +991,6 @@ export default function GamePage() {
         calledIndex: chiSet.indexOf(target),
       });
       next.prompt = null;
-      next.rinshanEligible = null;
-      next.chankanTarget = null;
       next.turn = next.userWind;
       return next;
     });
@@ -993,8 +1007,6 @@ export default function GamePage() {
       consumeDrawnTile(next.players[next.userWind]);
       next.players[next.userWind].hand = removeNTiles(next.players[next.userWind].hand, tile, 4);
       next.players[next.userWind].calledMelds.push({ type: "kan", tiles: [tile, tile, tile, tile] });
-      next.rinshanEligible = next.userWind;
-      next.chankanTarget = null;
       drawTileIfNeeded(next, next.userWind);
       return next;
     });
@@ -1009,8 +1021,6 @@ export default function GamePage() {
 
       const next = cloneState(prev);
       next.prompt = null;
-      next.rinshanEligible = null;
-      next.chankanTarget = null;
       next.turn = nextWind(prompt.from);
       if (next.turn === next.userWind) {
         drawTileIfNeeded(next, next.userWind);
