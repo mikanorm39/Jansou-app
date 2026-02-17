@@ -39,6 +39,14 @@ type HandPattern = {
 export type HandContext = {
   isReach: boolean;
   isIppatsu: boolean;
+  isDoubleReach?: boolean;
+  isRinshan?: boolean;
+  isChankan?: boolean;
+  isHaitei?: boolean;
+  isHoutei?: boolean;
+  isTenho?: boolean;
+  isChiho?: boolean;
+  kanCount?: number;
   doraIndicator: Tile;
   isMenzen: boolean;
   byTsumo: boolean;
@@ -96,6 +104,12 @@ function isTerminalOrHonorIndex(index: number): boolean {
   return rank === 1 || rank === 9;
 }
 
+function isTerminalIndex(index: number): boolean {
+  if (index >= 27) return false;
+  const rank = (index % 9) + 1;
+  return rank === 1 || rank === 9;
+}
+
 function findMeldPatterns(counts: number[], acc: MeldPattern[] = []): MeldPattern[] | null {
   const i = counts.findIndex((v) => v > 0);
   if (i === -1) return acc;
@@ -124,6 +138,45 @@ function findMeldPatterns(counts: number[], acc: MeldPattern[] = []): MeldPatter
   return null;
 }
 
+function collectMeldPatterns(counts: number[], out: MeldPattern[][], acc: MeldPattern[] = [], limit = 128) {
+  if (out.length >= limit) return;
+  const i = counts.findIndex((v) => v > 0);
+  if (i === -1) {
+    out.push([...acc]);
+    return;
+  }
+
+  if (counts[i] >= 3) {
+    counts[i] -= 3;
+    acc.push({ kind: "triplet", index: i });
+    collectMeldPatterns(counts, out, acc, limit);
+    acc.pop();
+    counts[i] += 3;
+  }
+
+  if (isSuitIndex(i)) {
+    const pos = i % 9;
+    if (pos <= 6 && counts[i + 1] > 0 && counts[i + 2] > 0) {
+      counts[i] -= 1;
+      counts[i + 1] -= 1;
+      counts[i + 2] -= 1;
+      acc.push({ kind: "sequence", index: i });
+      collectMeldPatterns(counts, out, acc, limit);
+      acc.pop();
+      counts[i] += 1;
+      counts[i + 1] += 1;
+      counts[i + 2] += 1;
+    }
+  }
+}
+
+function meldSignature(melds: MeldPattern[]): string {
+  return melds
+    .map((m) => `${m.kind === "sequence" ? "s" : "t"}${m.index}`)
+    .sort()
+    .join(",");
+}
+
 function findStandardHandPattern(tiles: Tile[]): HandPattern | null {
   if (tiles.length % 3 !== 2) return null;
 
@@ -143,8 +196,60 @@ function findStandardHandPattern(tiles: Tile[]): HandPattern | null {
   return null;
 }
 
+function findStandardHandPatterns(tiles: Tile[]): HandPattern[] {
+  if (tiles.length % 3 !== 2) return [];
+
+  const counts = toCounts(tiles);
+  const found: HandPattern[] = [];
+  const seen = new Set<string>();
+
+  for (let i = 0; i < 34; i += 1) {
+    if (counts[i] < 2) continue;
+    counts[i] -= 2;
+    const allMelds: MeldPattern[][] = [];
+    collectMeldPatterns(counts, allMelds);
+    counts[i] += 2;
+
+    for (const melds of allMelds) {
+      if (melds.length !== 4) continue;
+      const signature = `${i}|${meldSignature(melds)}`;
+      if (seen.has(signature)) continue;
+      seen.add(signature);
+      found.push({ pairIndex: i, melds });
+    }
+  }
+
+  return found;
+}
+
+function isChiitoitsu(tiles: Tile[]): boolean {
+  if (tiles.length !== 14) return false;
+  const counts = toCounts(tiles);
+  const pairs = counts.filter((c) => c === 2).length;
+  const invalid = counts.some((c) => c === 1 || c === 3 || c === 4);
+  return pairs === 7 && !invalid;
+}
+
+function isKokushiMusou(tiles: Tile[]): boolean {
+  if (tiles.length !== 14) return false;
+  const counts = toCounts(tiles);
+  const yaochuIndices = [
+    0, 8, 9, 17, 18, 26,
+    27, 28, 29, 30, 31, 32, 33,
+  ];
+  let pairFound = false;
+  for (const i of yaochuIndices) {
+    if (counts[i] === 0) return false;
+    if (counts[i] >= 2) pairFound = true;
+  }
+  for (let i = 0; i < 34; i += 1) {
+    if (!yaochuIndices.includes(i) && counts[i] > 0) return false;
+  }
+  return pairFound;
+}
+
 export function isWinningHand(tiles: Tile[]): boolean {
-  return findStandardHandPattern(tiles) !== null;
+  return findStandardHandPattern(tiles) !== null || isChiitoitsu(tiles) || isKokushiMusou(tiles);
 }
 
 function canWinByOneDraw(thirteenTiles: Tile[]): boolean {
@@ -285,7 +390,183 @@ function isTanyao(tiles: Tile[]): boolean {
   return tiles.every((tile) => !YAOCHU_SET.has(tile));
 }
 
-function calculateFu(pattern: HandPattern, context: HandContext): number {
+function windIndexOf(wind: PlayerWind | undefined): number | null {
+  if (wind === "east") return 27;
+  if (wind === "south") return 28;
+  if (wind === "west") return 29;
+  return null;
+}
+
+function sequenceStartRanksBySuit(pattern: HandPattern): Record<"m" | "p" | "s", number[]> {
+  const starts: Record<"m" | "p" | "s", number[]> = { m: [], p: [], s: [] };
+  for (const meld of pattern.melds) {
+    if (meld.kind !== "sequence") continue;
+    if (meld.index < 9) starts.m.push((meld.index % 9) + 1);
+    else if (meld.index < 18) starts.p.push((meld.index % 9) + 1);
+    else if (meld.index < 27) starts.s.push((meld.index % 9) + 1);
+  }
+  return starts;
+}
+
+function tripletIndices(pattern: HandPattern): number[] {
+  return pattern.melds.filter((m) => m.kind === "triplet").map((m) => m.index);
+}
+
+function isPinfuPattern(pattern: HandPattern, context: HandContext): boolean {
+  if (!context.isMenzen) return false;
+  if (!pattern.melds.every((m) => m.kind === "sequence")) return false;
+  const seatWindIndex = windIndexOf(context.seatWind);
+  const roundWindIndex = windIndexOf(context.roundWind);
+  const pairIsDragon = pattern.pairIndex >= 31 && pattern.pairIndex <= 33;
+  const pairIsWind = pattern.pairIndex === seatWindIndex || pattern.pairIndex === roundWindIndex;
+  return !pairIsDragon && !pairIsWind;
+}
+
+function countIipeiko(pattern: HandPattern): number {
+  const starts = sequenceStartRanksBySuit(pattern);
+  let pairs = 0;
+  for (const suit of ["m", "p", "s"] as const) {
+    const map = new Map<number, number>();
+    for (const start of starts[suit]) {
+      map.set(start, (map.get(start) ?? 0) + 1);
+    }
+    for (const count of map.values()) {
+      pairs += Math.floor(count / 2);
+    }
+  }
+  return pairs;
+}
+
+function hasIttsuu(pattern: HandPattern): boolean {
+  const starts = sequenceStartRanksBySuit(pattern);
+  for (const suit of ["m", "p", "s"] as const) {
+    const set = new Set(starts[suit]);
+    if (set.has(1) && set.has(4) && set.has(7)) return true;
+  }
+  return false;
+}
+
+function hasSanshokuDoujun(pattern: HandPattern): boolean {
+  const starts = sequenceStartRanksBySuit(pattern);
+  for (let rank = 1; rank <= 7; rank += 1) {
+    if (starts.m.includes(rank) && starts.p.includes(rank) && starts.s.includes(rank)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function hasSanshokuDoukou(pattern: HandPattern): boolean {
+  const t = tripletIndices(pattern);
+  for (let rank = 1; rank <= 9; rank += 1) {
+    if (t.includes(rank - 1) && t.includes(9 + rank - 1) && t.includes(18 + rank - 1)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isChanta(pattern: HandPattern): boolean {
+  const pairOk = isTerminalOrHonorIndex(pattern.pairIndex);
+  if (!pairOk) return false;
+  return pattern.melds.every((meld) => {
+    if (meld.kind === "triplet") return isTerminalOrHonorIndex(meld.index);
+    const startRank = (meld.index % 9) + 1;
+    return startRank === 1 || startRank === 7;
+  });
+}
+
+function isJunchan(pattern: HandPattern): boolean {
+  const pairOk = isTerminalIndex(pattern.pairIndex);
+  if (!pairOk) return false;
+  return pattern.melds.every((meld) => {
+    if (meld.kind === "triplet") return isTerminalIndex(meld.index);
+    const startRank = (meld.index % 9) + 1;
+    return startRank === 1 || startRank === 7;
+  });
+}
+
+function isHonitsu(tiles: Tile[]): boolean {
+  const suits = new Set<string>();
+  let hasHonor = false;
+  for (const tile of tiles) {
+    if (tile[0] === "z") hasHonor = true;
+    else suits.add(tile[0]);
+  }
+  return suits.size === 1 && hasHonor;
+}
+
+function isChinitsu(tiles: Tile[]): boolean {
+  const suits = new Set<string>();
+  for (const tile of tiles) {
+    if (tile[0] === "z") return false;
+    suits.add(tile[0]);
+  }
+  return suits.size === 1;
+}
+
+function isHonroto(tiles: Tile[]): boolean {
+  return tiles.every((tile) => YAOCHU_SET.has(tile));
+}
+
+function countDragonTriplets(pattern: HandPattern): number {
+  return pattern.melds.filter((m) => m.kind === "triplet" && m.index >= 31 && m.index <= 33).length;
+}
+
+function hasShosangen(pattern: HandPattern): boolean {
+  const dragonTriplets = countDragonTriplets(pattern);
+  const dragonPair = pattern.pairIndex >= 31 && pattern.pairIndex <= 33;
+  return dragonTriplets === 2 && dragonPair;
+}
+
+function isTsuiso(tiles: Tile[]): boolean {
+  return tiles.every((tile) => tile[0] === "z");
+}
+
+function isRyuiso(tiles: Tile[]): boolean {
+  const green = new Set<Tile>(["s2", "s3", "s4", "s6", "s8", "z6"]);
+  return tiles.every((tile) => green.has(tile));
+}
+
+function isChinroto(tiles: Tile[]): boolean {
+  return tiles.every((tile) => tile[0] !== "z" && (tile[1] === "1" || tile[1] === "9"));
+}
+
+function isChuurenPoutou(tiles: Tile[]): boolean {
+  if (tiles.length !== 14) return false;
+  if (tiles.some((tile) => tile[0] === "z")) return false;
+  const suit = tiles[0][0];
+  if (tiles.some((tile) => tile[0] !== suit)) return false;
+  const counts = Array.from({ length: 10 }, () => 0);
+  for (const tile of tiles) {
+    counts[Number(tile[1])] += 1;
+  }
+  if (counts[1] < 3 || counts[9] < 3) return false;
+  for (let i = 2; i <= 8; i += 1) {
+    if (counts[i] < 1) return false;
+  }
+  return true;
+}
+
+function windTripletCount(pattern: HandPattern): number {
+  return pattern.melds.filter((m) => m.kind === "triplet" && m.index >= 27 && m.index <= 30).length;
+}
+
+function hasShosushi(pattern: HandPattern): boolean {
+  return windTripletCount(pattern) === 3 && pattern.pairIndex >= 27 && pattern.pairIndex <= 30;
+}
+
+function hasDaisushi(pattern: HandPattern): boolean {
+  return windTripletCount(pattern) === 4;
+}
+
+function calculateFu(pattern: HandPattern | null, context: HandContext, options?: { isPinfu?: boolean; isChiitoitsu?: boolean }): number {
+  if (options?.isChiitoitsu) return 25;
+  if (!pattern) return 30;
+  if (options?.isPinfu) {
+    return context.byTsumo ? 20 : 30;
+  }
+
   let fu = 20;
 
   if (context.byTsumo) {
@@ -305,11 +586,10 @@ function calculateFu(pattern: HandPattern, context: HandContext): number {
     }
   }
 
-  const pairTile = toTile(pattern.pairIndex);
-  const pairWind =
-    (context.seatWind === "east" && pairTile === "z1") ||
-    (context.roundWind === "east" && pairTile === "z1");
-  const pairDragon = pairTile === "z5" || pairTile === "z6" || pairTile === "z7";
+  const seatWindIndex = windIndexOf(context.seatWind);
+  const roundWindIndex = windIndexOf(context.roundWind);
+  const pairWind = pattern.pairIndex === seatWindIndex || pattern.pairIndex === roundWindIndex;
+  const pairDragon = pattern.pairIndex >= 31 && pattern.pairIndex <= 33;
   if (pairWind || pairDragon) {
     fu += 2;
   }
@@ -318,59 +598,213 @@ function calculateFu(pattern: HandPattern, context: HandContext): number {
 }
 
 function calculateHandResult(tiles: Tile[], context: HandContext): HandResult {
-  const yaku: string[] = [];
-  let han = 0;
+  const patterns = findStandardHandPatterns(tiles);
+  const hasStandard = patterns.length > 0;
+  const chiitoitsu = isChiitoitsu(tiles);
+  const kokushi = isKokushiMusou(tiles);
 
-  if (context.isReach) {
-    yaku.push("リーチ");
-    han += 1;
+  if (!hasStandard && !chiitoitsu && !kokushi) {
+    return { han: 0, fu: 20, yaku: ["役なし"], basePoints: 0 };
   }
 
-  if (context.isIppatsu) {
-    yaku.push("一発");
-    han += 1;
+  const yakuman: string[] = [];
+  if (context.isTenho) yakuman.push("天和");
+  if (context.isChiho) yakuman.push("地和");
+  if (kokushi) yakuman.push("国士無双");
+  if (isTsuiso(tiles)) yakuman.push("字一色");
+  if (isRyuiso(tiles)) yakuman.push("緑一色");
+  if (isChinroto(tiles)) yakuman.push("清老頭");
+  if (isChuurenPoutou(tiles)) yakuman.push("九蓮宝燈");
+  if ((context.kanCount ?? 0) >= 4) yakuman.push("四槓子");
+
+  if (hasStandard) {
+    if (patterns.some((p) => countDragonTriplets(p) === 3)) yakuman.push("大三元");
+    if (patterns.some((p) => hasShosushi(p))) yakuman.push("小四喜");
+    if (patterns.some((p) => hasDaisushi(p))) yakuman.push("大四喜");
+    if (context.isMenzen && patterns.some((p) => p.melds.every((m) => m.kind === "triplet"))) yakuman.push("四暗刻");
   }
 
-  if (context.byTsumo && context.isMenzen) {
-    yaku.push("門前ツモ");
-    han += 1;
+  if (yakuman.length > 0) {
+    const uniqueYakuman = [...new Set(yakuman)];
+    const han = uniqueYakuman.length * 13;
+    const basePoints = 8000 * uniqueYakuman.length;
+    return { han, fu: 0, yaku: uniqueYakuman, basePoints };
   }
 
-  if (isTanyao(tiles)) {
-    yaku.push("タンヤオ");
-    han += 1;
-  }
+  type Candidate = { han: number; fu: number; yaku: string[] };
+  const candidates: Candidate[] = [];
 
-  const pattern = findStandardHandPattern(tiles);
-  if (pattern) {
-    const dragonTriplet = pattern.melds.some((m) => m.kind === "triplet" && (m.index === 31 || m.index === 32 || m.index === 33));
-    if (dragonTriplet) {
-      yaku.push("役牌");
+  function baseYaku(): Candidate {
+    const yaku: string[] = [];
+    let han = 0;
+
+    if (context.isDoubleReach) {
+      yaku.push("ダブルリーチ");
+      han += 2;
+    } else if (context.isReach) {
+      yaku.push("リーチ");
       han += 1;
     }
 
-    const allTriplets = pattern.melds.every((m) => m.kind === "triplet");
-    if (allTriplets) {
-      yaku.push("対々和");
+    if (context.isIppatsu) {
+      yaku.push("一発");
+      han += 1;
+    }
+    if (context.byTsumo && context.isMenzen) {
+      yaku.push("門前ツモ");
+      han += 1;
+    }
+    if (context.isChankan) {
+      yaku.push("槍槓");
+      han += 1;
+    }
+    if (context.isRinshan) {
+      yaku.push("嶺上開花");
+      han += 1;
+    }
+    if (context.isHaitei) {
+      yaku.push("海底摸月");
+      han += 1;
+    }
+    if (context.isHoutei) {
+      yaku.push("河底撈魚");
+      han += 1;
+    }
+    if (isTanyao(tiles)) {
+      yaku.push("タンヤオ");
+      han += 1;
+    }
+    if (isHonitsu(tiles)) {
+      yaku.push("混一色");
+      han += context.isMenzen ? 3 : 2;
+    }
+    if (isChinitsu(tiles)) {
+      yaku.push("清一色");
+      han += context.isMenzen ? 6 : 5;
+    }
+    if (isHonroto(tiles)) {
+      yaku.push("混老頭");
       han += 2;
+    }
+    return { han, fu: 30, yaku };
+  }
+
+  if (chiitoitsu) {
+    const c = baseYaku();
+    c.yaku.push("七対子");
+    c.han += 2;
+    c.fu = 25;
+    candidates.push(c);
+  }
+
+  for (const pattern of patterns) {
+    const c = baseYaku();
+    const iipeikoPairs = countIipeiko(pattern);
+    const pinfu = isPinfuPattern(pattern, context);
+    const dragonTriplets = countDragonTriplets(pattern);
+    const allTriplets = pattern.melds.every((m) => m.kind === "triplet");
+    const tripletCount = pattern.melds.filter((m) => m.kind === "triplet").length;
+
+    if (pinfu) {
+      c.yaku.push("平和");
+      c.han += 1;
+    }
+
+    if (context.isMenzen) {
+      if (iipeikoPairs >= 2) {
+        c.yaku.push("二盃口");
+        c.han += 3;
+      } else if (iipeikoPairs >= 1) {
+        c.yaku.push("一盃口");
+        c.han += 1;
+      }
+    }
+
+    if (dragonTriplets > 0) {
+      c.yaku.push("役牌");
+      c.han += 1;
+    }
+
+    if (allTriplets) {
+      c.yaku.push("対々和");
+      c.han += 2;
+    }
+
+    if (hasIttsuu(pattern)) {
+      c.yaku.push("一気通貫");
+      c.han += context.isMenzen ? 2 : 1;
+    }
+
+    if (hasSanshokuDoujun(pattern)) {
+      c.yaku.push("三色同順");
+      c.han += context.isMenzen ? 2 : 1;
+    }
+
+    if (hasSanshokuDoukou(pattern)) {
+      c.yaku.push("三色同刻");
+      c.han += 2;
+    }
+
+    if (tripletCount >= 3 && context.isMenzen) {
+      c.yaku.push("三暗刻");
+      c.han += 2;
+    }
+
+    if (isChanta(pattern)) {
+      c.yaku.push("混全帯么九");
+      c.han += context.isMenzen ? 2 : 1;
+    }
+
+    if (isJunchan(pattern)) {
+      c.yaku.push("純全帯么九");
+      c.han += context.isMenzen ? 3 : 2;
+    }
+
+    if (hasShosangen(pattern)) {
+      c.yaku.push("小三元");
+      c.han += 2;
+    }
+
+    if ((context.kanCount ?? 0) >= 3) {
+      c.yaku.push("三槓子");
+      c.han += 2;
+    }
+
+    c.fu = calculateFu(pattern, context, { isPinfu: pinfu });
+    candidates.push(c);
+  }
+
+  let best: Candidate | null = null;
+  for (const candidate of candidates) {
+    const doraCount = countDora(tiles, context.doraIndicator);
+    const withDora: Candidate = {
+      han: candidate.han,
+      fu: candidate.fu,
+      yaku: [...candidate.yaku],
+    };
+    if (doraCount > 0) {
+      withDora.han += doraCount;
+      withDora.yaku.push(`ドラ${doraCount}`);
+    }
+    if (withDora.han <= 0) {
+      withDora.han = 1;
+      withDora.yaku.push("役なし");
+    }
+
+    if (!best) {
+      best = withDora;
+      continue;
+    }
+    const bestValue = best.fu * 2 ** (best.han + 2);
+    const nextValue = withDora.fu * 2 ** (withDora.han + 2);
+    if (nextValue > bestValue || (nextValue === bestValue && withDora.han > best.han)) {
+      best = withDora;
     }
   }
 
-  const doraCount = countDora(tiles, context.doraIndicator);
-  if (doraCount > 0) {
-    yaku.push(`ドラ${doraCount}`);
-    han += doraCount;
-  }
-
-  if (han <= 0) {
-    yaku.push("役なし");
-    han = 1;
-  }
-
-  const fu = pattern ? calculateFu(pattern, context) : 30;
-  const basePoints = fu * 2 ** (han + 2);
-
-  return { han, fu, yaku, basePoints };
+  const result = best ?? { han: 1, fu: 30, yaku: ["役なし"] };
+  const basePoints = result.fu * 2 ** (result.han + 2);
+  return { han: result.han, fu: result.fu, yaku: [...new Set(result.yaku)], basePoints };
 }
 
 function roundUp100(value: number): number {
