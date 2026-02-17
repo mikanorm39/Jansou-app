@@ -12,20 +12,42 @@ export type CommentaryEvent =
   | "draw"
   | "yaku"
   | "turn_hurry"
-  | "repeat_discard";
+  | "repeat_discard"
+  | "idle_chat";
 
 const DUPLICATE_GUARD_MS = 1200;
 const lastPlayedAt = new Map<string, number>();
 let playbackQueue: Promise<void> = Promise.resolve();
+let activePlaybackCount = 0;
+let lastVoiceActivityAt = Date.now();
 
 export type PlayCommentaryOptions = {
   yakuName?: string;
 };
 
+function markVoiceActivity() {
+  lastVoiceActivityAt = Date.now();
+}
+
+export function getLastVoiceActivityAt(): number {
+  return lastVoiceActivityAt;
+}
+
+export function isVoicePlaybackBusy(): boolean {
+  return activePlaybackCount > 0;
+}
+
 async function playAudioFromUrl(url: string): Promise<void> {
   await new Promise<void>((resolve) => {
     const audio = new Audio(url);
+    let cleaned = false;
+    activePlaybackCount += 1;
+    markVoiceActivity();
     const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
+      activePlaybackCount = Math.max(0, activePlaybackCount - 1);
+      markVoiceActivity();
       audio.removeEventListener("ended", onEnded);
       audio.removeEventListener("error", onError);
       resolve();
