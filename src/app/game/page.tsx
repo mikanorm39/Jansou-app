@@ -876,6 +876,26 @@ export default function GamePage() {
     (state.prompt?.chiOptions.length ?? 0) > 0,
   );
   const isWinPromptVisible = Boolean(canTsumo || state.prompt?.canRon);
+  const displayHandTiles = useMemo(() => {
+    const handIndexesByTile = new Map<TileType, number[]>();
+    for (let i = 0; i < me.hand.length; i += 1) {
+      const tile = me.hand[i];
+      const queue = handIndexesByTile.get(tile) ?? [];
+      queue.push(i);
+      handIndexesByTile.set(tile, queue);
+    }
+
+    const sortedTiles = sortTiles(me.drawnTile ? [...me.hand, me.drawnTile] : [...me.hand]);
+    return sortedTiles.map((tile, order) => {
+      const queue = handIndexesByTile.get(tile) ?? [];
+      if (queue.length > 0) {
+        const handIndex = queue.shift() as number;
+        handIndexesByTile.set(tile, queue);
+        return { key: `h-${handIndex}-${tile}-${order}`, tile, index: handIndex, fromDrawn: false };
+      }
+      return { key: `d-${tile}-${order}`, tile, index: -1, fromDrawn: true };
+    });
+  }, [me.hand, me.drawnTile]);
 
   useEffect(() => {
     if (isCallPromptVisible && !callPromptVisibleRef.current) {
@@ -1283,16 +1303,11 @@ export default function GamePage() {
           )}
 
           <div className="flex items-end justify-center gap-2 overflow-x-auto pb-1">
-            {me.hand.map((tile, index) => (
-              <button key={`${tile}-${index}`} type="button" onClick={() => void discardByUser(index)} className="transition hover:-translate-y-1">
-                <Tile tile={tile} />
+            {displayHandTiles.map((entry) => (
+              <button key={entry.key} type="button" onClick={() => void discardByUser(entry.index, entry.fromDrawn)} className="transition hover:-translate-y-1">
+                <Tile tile={entry.tile} className={entry.fromDrawn ? "ring-2 ring-cyan-400/80" : undefined} />
               </button>
             ))}
-            {me.drawnTile && (
-              <button type="button" onClick={() => void discardByUser(-1, true)} className="ml-6 transition hover:-translate-y-1">
-                <Tile tile={me.drawnTile} />
-              </button>
-            )}
 
             {me.calledMelds.map((meld, i) => (
               <div key={`meld-${i}`} className="ml-2 flex gap-1 rounded-md border-2 border-amber-300/90 bg-black/30 py-2 pl-2 pr-4 shadow-[0_0_10px_rgba(252,211,77,0.35)]">
