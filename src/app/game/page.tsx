@@ -136,6 +136,7 @@ const ORIGINAL_YAKU_GUIDE: Array<{ name: string; han: string; description: strin
   { name: "ドラ隣N", han: "0.5N翻", description: "ドラの次の次の牌。1枚につき0.5翻。" },
   { name: "無限立直xN", han: "特殊", description: "2回目以降の立直回数に応じる特殊加点。" },
 ];
+const ORIGINAL_YAKU_NAMES = new Set(ORIGINAL_YAKU_GUIDE.map((entry) => entry.name));
 
 function nextWind(wind: PlayerWind): PlayerWind {
   if (wind === "east") return "south";
@@ -491,6 +492,20 @@ function findReachDiscardIndex(hand: TileType[], alreadyReached: boolean): numbe
   return null;
 }
 
+function findReachSafeHandDiscardIndex(player: PlayerState): number | null {
+  if (!player.drawnTile) return null;
+  for (let i = 0; i < player.hand.length; i += 1) {
+    const next = [...player.hand.slice(0, i), ...player.hand.slice(i + 1), player.drawnTile];
+    if (calculateShanten(next) === 0) return i;
+  }
+  return null;
+}
+
+function canDiscardDrawnAndKeepReach(player: PlayerState): boolean {
+  if (!player.drawnTile) return false;
+  return calculateShanten([...player.hand]) === 0;
+}
+
 function buildRankings(state: GameState): RankingEntry[] {
   return [...WINDS]
     .map((wind) => ({
@@ -697,7 +712,7 @@ export default function GamePage() {
   const callPromptVisibleRef = useRef(false);
   const winPromptVisibleRef = useRef(false);
   const idleChatPendingRef = useRef(false);
-  const autoTsumogiriPendingRef = useRef(false);
+  const autoTsumogiriTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!showYakuGuide) return;
@@ -878,6 +893,10 @@ export default function GamePage() {
     }
   };
 
+  const getOriginalYakuNames = (yakuNames: string[]): string[] => {
+    return [...new Set(yakuNames)].filter((name) => ORIGINAL_YAKU_NAMES.has(name));
+  };
+
   const scheduleCpuTurn = () => {
     if (cpuTimerRef.current !== null) {
       window.clearTimeout(cpuTimerRef.current);
@@ -952,8 +971,9 @@ export default function GamePage() {
     !state.drawReason &&
     state.turn === state.userWind &&
     me.calledMelds.length === 0 &&
-    !me.ippatsuPrimed &&
-    canDeclareReach(meFullHand, false);
+    (me.isReach
+      ? Boolean(me.drawnTile) && !me.ippatsuPrimed
+      : !me.ippatsuPrimed && canDeclareReach(meFullHand, false));
   const canTsumo = !state.prompt && !state.winner && !state.drawReason && state.turn === state.userWind && isWinningHand(meFullHand, 4 - me.calledMelds.length);
   const showReachAction = canReach && !canTsumo && !state.prompt?.canRon;
   const concealedKans = !state.prompt && !state.winner && !state.drawReason && state.turn === state.userWind ? concealedKanOptions(meFullHand) : [];
@@ -1024,7 +1044,9 @@ export default function GamePage() {
     draft.lastDiscard = { from: draft.userWind, tile };
     if (player.ippatsuPrimed) {
       player.ippatsuPrimed = false;
-      player.ippatsuEligible = true;
+      if (player.reachCount === 1) {
+        player.ippatsuEligible = true;
+      }
     } else if (player.isReach && player.ippatsuEligible && !declaredReachThisDiscard) {
       player.ippatsuEligible = false;
     }
@@ -1059,10 +1081,18 @@ export default function GamePage() {
       concealedKans.length === 0 &&
       !canConcealedWindSetKan;
 
-    if (!shouldAutoTsumogiri || autoTsumogiriPendingRef.current) return;
+    if (!shouldAutoTsumogiri) {
+      if (autoTsumogiriTimerRef.current !== null) {
+        window.clearTimeout(autoTsumogiriTimerRef.current);
+        autoTsumogiriTimerRef.current = null;
+      }
+      return;
+    }
 
-    autoTsumogiriPendingRef.current = true;
-    const timer = window.setTimeout(() => {
+    if (autoTsumogiriTimerRef.current !== null) return;
+
+    autoTsumogiriTimerRef.current = window.setTimeout(() => {
+      autoTsumogiriTimerRef.current = null;
       setState((prev) => {
         if (prev.turn !== prev.userWind || prev.prompt || prev.winner || prev.drawReason) return prev;
         const next = cloneState(prev);
@@ -1070,16 +1100,35 @@ export default function GamePage() {
         if (!player.isReach) return prev;
 
         player.rinshanReady = false;
-        const tile = player.drawnTile;
-        if (!tile) return prev;
         const declaredReachThisDiscard = player.ippatsuPrimed;
 
-        player.drawnTile = null;
+        let tile: TileType | null = null;
+        if (player.ippatsuPrimed) {
+          const handIndex = findReachSafeHandDiscardIndex(player);
+          if (handIndex !== null) {
+            tile = player.hand[handIndex];
+            player.hand.splice(handIndex, 1);
+            consumeDrawnTile(player);
+          } else if (canDiscardDrawnAndKeepReach(player)) {
+            tile = player.drawnTile;
+            player.drawnTile = null;
+          } else {
+            return prev;
+          }
+        } else {
+          tile = player.drawnTile;
+          if (!tile) return prev;
+          player.drawnTile = null;
+        }
+        if (!tile) return prev;
+
         player.discards.push(tile);
         next.lastDiscard = { from: next.userWind, tile };
         if (player.ippatsuPrimed) {
           player.ippatsuPrimed = false;
-          player.ippatsuEligible = true;
+          if (player.reachCount === 1) {
+            player.ippatsuEligible = true;
+          }
         } else if (player.isReach && player.ippatsuEligible && !declaredReachThisDiscard) {
           player.ippatsuEligible = false;
         }
@@ -1095,13 +1144,7 @@ export default function GamePage() {
         next.turn = nextWind(next.userWind);
         return next;
       });
-      autoTsumogiriPendingRef.current = false;
-    }, 120);
-
-    return () => {
-      window.clearTimeout(timer);
-      autoTsumogiriPendingRef.current = false;
-    };
+    }, 260);
   }, [
     state.turn,
     state.userWind,
@@ -1115,6 +1158,14 @@ export default function GamePage() {
     concealedKans.length,
     canConcealedWindSetKan,
   ]);
+
+  useEffect(() => {
+    return () => {
+      if (autoTsumogiriTimerRef.current !== null) {
+        window.clearTimeout(autoTsumogiriTimerRef.current);
+      }
+    };
+  }, []);
 
   const onReach = async () => {
     if (!canReach) return;
@@ -1134,7 +1185,8 @@ export default function GamePage() {
       }
       player.reachCount += 1;
       if (wasReached) {
-        player.ippatsuPrimed = false;
+        player.ippatsuPrimed = true;
+        player.ippatsuEligible = false;
       }
       return next;
     });
@@ -1155,6 +1207,13 @@ export default function GamePage() {
       yakuNames = settled.winner?.yaku ?? [];
       return settled;
     });
+
+    const originalYakuNames = getOriginalYakuNames(yakuNames);
+    if (originalYakuNames.length > 0) {
+      await playYakuCommentaryInOrder(originalYakuNames);
+      await playCommentary("tsumo", selectedChar);
+      return;
+    }
 
     await playCommentary("tsumo", selectedChar);
     await playYakuCommentaryInOrder(yakuNames);
@@ -1178,6 +1237,13 @@ export default function GamePage() {
       yakuNames = settled.winner?.yaku ?? [];
       return settled;
     });
+
+    const originalYakuNames = getOriginalYakuNames(yakuNames);
+    if (originalYakuNames.length > 0) {
+      await playYakuCommentaryInOrder(originalYakuNames);
+      await playCommentary("ron", selectedChar);
+      return;
+    }
 
     await playCommentary("ron", selectedChar);
     await playYakuCommentaryInOrder(yakuNames);
