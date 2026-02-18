@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Tile } from "../../components/Tile";
 import type { PlayerWind, Tile as TileType } from "../../../types/mahjong";
 import { dealInitialHands, sortTiles } from "../../../lib/shuffler";
@@ -676,11 +677,8 @@ function dealerHasMenzenTsumo(state: GameState): boolean {
 }
 
 export default function GamePage() {
-  const [selectedChar] = useState(() => {
-    if (typeof window === "undefined") return "ojousama";
-    const params = new URLSearchParams(window.location.search);
-    return params.get("char") ?? "ojousama";
-  });
+  const searchParams = useSearchParams();
+  const selectedChar = searchParams.get("char") ?? "ojousama";
   const initial = useMemo(() => createInitialState(), []);
   const [state, setState] = useState<GameState>(initial);
   const [scoreFlash, setScoreFlash] = useState(true);

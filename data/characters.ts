@@ -36,4 +36,13 @@ export const characters: VoiceCharacter[] = [
       sovitsModelPath: "models/datsuryoku/sovits.pth",
     },
   },
+  {
+    id: "mochiko",
+    name: "もち子",
+    description: "もち子ボイスで実況する",
+    model: {
+      gptModelPath: "models/girl/gpt.ckpt",
+      sovitsModelPath: "models/girl/sovits.pth",
+    },
+  },
 ];
