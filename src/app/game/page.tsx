@@ -20,6 +20,7 @@ import {
 import {
   getLastVoiceActivityAt,
   isVoicePlaybackBusy,
+  playCommentaryBatchInOrder,
   playCommentary,
 } from "../../../lib/voiceService";
 import { characters } from "../../../data/characters";
@@ -1210,13 +1211,19 @@ export default function GamePage() {
 
     const originalYakuNames = getOriginalYakuNames(yakuNames);
     if (originalYakuNames.length > 0) {
-      await playYakuCommentaryInOrder(originalYakuNames);
+      await playCommentaryBatchInOrder(
+        selectedChar,
+        [...new Set(originalYakuNames)].map((yakuName) => ({ event: "yaku", options: { yakuName } })),
+      );
       await playCommentary("tsumo", selectedChar);
       return;
     }
 
     await playCommentary("tsumo", selectedChar);
-    await playYakuCommentaryInOrder(yakuNames);
+    await playCommentaryBatchInOrder(
+      selectedChar,
+      [...new Set(yakuNames)].map((yakuName) => ({ event: "yaku", options: { yakuName } })),
+    );
   };
 
   const onRon = async () => {
@@ -1240,13 +1247,19 @@ export default function GamePage() {
 
     const originalYakuNames = getOriginalYakuNames(yakuNames);
     if (originalYakuNames.length > 0) {
-      await playYakuCommentaryInOrder(originalYakuNames);
+      await playCommentaryBatchInOrder(
+        selectedChar,
+        [...new Set(originalYakuNames)].map((yakuName) => ({ event: "yaku", options: { yakuName } })),
+      );
       await playCommentary("ron", selectedChar);
       return;
     }
 
     await playCommentary("ron", selectedChar);
-    await playYakuCommentaryInOrder(yakuNames);
+    await playCommentaryBatchInOrder(
+      selectedChar,
+      [...new Set(yakuNames)].map((yakuName) => ({ event: "yaku", options: { yakuName } })),
+    );
   };
 
   const onPon = async () => {
@@ -1599,8 +1612,20 @@ export default function GamePage() {
 
           <div className="flex items-end justify-center gap-2 overflow-x-auto pb-1">
             {displayHandTiles.map((entry) => (
-              <button key={entry.key} type="button" onClick={() => void discardByUser(entry.index, entry.fromDrawn)} className="transition hover:-translate-y-1">
-                <Tile tile={entry.tile} className={entry.fromDrawn ? "ring-2 ring-cyan-400/80" : undefined} />
+              <button
+                key={entry.key}
+                type="button"
+                onClick={() => void discardByUser(entry.index, entry.fromDrawn)}
+                className={`transition hover:-translate-y-1 ${entry.fromDrawn ? "animate-pulse" : ""}`}
+              >
+                <Tile
+                  tile={entry.tile}
+                  className={
+                    entry.fromDrawn
+                      ? "scale-110 ring-4 ring-cyan-300 shadow-[0_0_0_2px_rgba(34,211,238,0.55),0_0_26px_rgba(34,211,238,0.75)] brightness-110"
+                      : undefined
+                  }
+                />
               </button>
             ))}
 
