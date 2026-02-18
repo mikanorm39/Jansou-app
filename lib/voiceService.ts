@@ -25,6 +25,11 @@ export type PlayCommentaryOptions = {
   yakuName?: string;
 };
 
+type CommentaryRequest = {
+  event: CommentaryEvent;
+  options?: PlayCommentaryOptions;
+};
+
 function markVoiceActivity() {
   lastVoiceActivityAt = Date.now();
 }
@@ -35,6 +40,47 @@ export function getLastVoiceActivityAt(): number {
 
 export function isVoicePlaybackBusy(): boolean {
   return activePlaybackCount > 0;
+}
+
+function buildGuardKey(
+  event: CommentaryEvent,
+  characterType: string,
+  options?: PlayCommentaryOptions,
+): string {
+  const yakuKey = options?.yakuName ? `:${options.yakuName}` : "";
+  return `${characterType}:${event}${yakuKey}`;
+}
+
+function passDuplicateGuard(guardKey: string): boolean {
+  const now = Date.now();
+  const last = lastPlayedAt.get(guardKey);
+  if (typeof last === "number" && now - last < DUPLICATE_GUARD_MS) {
+    return false;
+  }
+  lastPlayedAt.set(guardKey, now);
+  return true;
+}
+
+async function fetchCommentaryUrl(
+  event: CommentaryEvent,
+  characterType: string,
+  options?: PlayCommentaryOptions,
+): Promise<string | null> {
+  const params = new URLSearchParams({
+    character: characterType,
+    event,
+  });
+  if (options?.yakuName) {
+    params.set("yaku", options.yakuName);
+  }
+
+  const response = await fetch(`/api/voice?${params.toString()}`, {
+    method: "GET",
+  });
+  if (!response.ok) return null;
+
+  const data = (await response.json()) as { url?: string | null };
+  return data.url ?? null;
 }
 
 async function playAudioFromUrl(url: string): Promise<void> {
@@ -70,31 +116,12 @@ export async function playCommentary(
   options?: PlayCommentaryOptions,
 ): Promise<void> {
   try {
-    const now = Date.now();
-    const yakuKey = options?.yakuName ? `:${options.yakuName}` : "";
-    const guardKey = `${characterType}:${event}${yakuKey}`;
-    const last = lastPlayedAt.get(guardKey);
-    if (typeof last === "number" && now - last < DUPLICATE_GUARD_MS) {
+    const guardKey = buildGuardKey(event, characterType, options);
+    if (!passDuplicateGuard(guardKey)) {
       return;
     }
-    lastPlayedAt.set(guardKey, now);
-
-    const params = new URLSearchParams({
-      character: characterType,
-      event,
-    });
-    if (options?.yakuName) {
-      params.set("yaku", options.yakuName);
-    }
-
-    const response = await fetch(`/api/voice?${params.toString()}`, {
-      method: "GET",
-    });
-    if (!response.ok) return;
-
-    const data = (await response.json()) as { url?: string | null };
-    if (!data.url) return;
-    const voiceUrl = data.url;
+    const voiceUrl = await fetchCommentaryUrl(event, characterType, options);
+    if (!voiceUrl) return;
 
     playbackQueue = playbackQueue
       .catch(() => {})
@@ -102,5 +129,31 @@ export async function playCommentary(
     await playbackQueue;
   } catch (error) {
     console.error("Voice playback failed:", error);
+  }
+}
+
+export async function playCommentaryBatchInOrder(
+  characterType: string,
+  requests: CommentaryRequest[],
+): Promise<void> {
+  try {
+    const targets = requests.filter((request) =>
+      passDuplicateGuard(buildGuardKey(request.event, characterType, request.options)),
+    );
+    if (targets.length === 0) return;
+
+    const urls = await Promise.all(
+      targets.map((request) => fetchCommentaryUrl(request.event, characterType, request.options)),
+    );
+
+    for (const voiceUrl of urls) {
+      if (!voiceUrl) continue;
+      playbackQueue = playbackQueue
+        .catch(() => {})
+        .then(() => playAudioFromUrl(voiceUrl));
+    }
+    await playbackQueue;
+  } catch (error) {
+    console.error("Voice batch playback failed:", error);
   }
 }
