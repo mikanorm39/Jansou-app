@@ -447,11 +447,12 @@ function resolveCpuTurn(state: GameState): GameState {
   }
 
   const user = next.players[next.userWind];
+  const userReached = user.isReach;
   const ron = isWinningHand([...user.hand, tile], 4 - user.calledMelds.length);
-  const pon = canPon(user.hand, tile);
-  const kan = canKan(user.hand, tile) || canKanByWindSetFromDiscard(user.hand, tile);
+  const pon = !userReached && canPon(user.hand, tile);
+  const kan = !userReached && (canKan(user.hand, tile) || canKanByWindSetFromDiscard(user.hand, tile));
   const canChiFromThisPlayer = wind === prevWind(next.userWind);
-  const chi = canChiFromThisPlayer ? chiOptions(user.hand, tile) : [];
+  const chi = !userReached && canChiFromThisPlayer ? chiOptions(user.hand, tile) : [];
 
   if (ron || pon || kan || chi.length > 0) {
     next.prompt = { from: wind, tile, canPon: pon, canRon: ron, canKan: kan, chiOptions: chi };
@@ -675,11 +676,11 @@ function dealerHasMenzenTsumo(state: GameState): boolean {
 }
 
 export default function GamePage() {
-  const [selectedChar, setSelectedChar] = useState("ojousama");
-  useEffect(() => {
+  const [selectedChar] = useState(() => {
+    if (typeof window === "undefined") return "ojousama";
     const params = new URLSearchParams(window.location.search);
-    setSelectedChar(params.get("char") ?? "ojousama");
-  }, []);
+    return params.get("char") ?? "ojousama";
+  });
   const initial = useMemo(() => createInitialState(), []);
   const [state, setState] = useState<GameState>(initial);
   const [scoreFlash, setScoreFlash] = useState(true);
@@ -698,6 +699,7 @@ export default function GamePage() {
   const callPromptVisibleRef = useRef(false);
   const winPromptVisibleRef = useRef(false);
   const idleChatPendingRef = useRef(false);
+  const autoTsumogiriPendingRef = useRef(false);
 
   useEffect(() => {
     if (!showYakuGuide) return;
@@ -1006,6 +1008,7 @@ export default function GamePage() {
 
     const draft = cloneState(state);
     const player = draft.players[draft.userWind];
+    if (player.isReach && !player.ippatsuPrimed && !fromDrawn) return;
     player.rinshanReady = false;
     const tile = fromDrawn ? player.drawnTile : player.hand[index];
     if (!tile) return;
@@ -1045,22 +1048,96 @@ export default function GamePage() {
     }
   };
 
+  useEffect(() => {
+    const shouldAutoTsumogiri =
+      state.turn === state.userWind &&
+      !state.prompt &&
+      !state.winner &&
+      !state.drawReason &&
+      me.isReach &&
+      Boolean(me.drawnTile) &&
+      !canTsumo &&
+      !canReach &&
+      concealedKans.length === 0 &&
+      !canConcealedWindSetKan;
+
+    if (!shouldAutoTsumogiri || autoTsumogiriPendingRef.current) return;
+
+    autoTsumogiriPendingRef.current = true;
+    const timer = window.setTimeout(() => {
+      setState((prev) => {
+        if (prev.turn !== prev.userWind || prev.prompt || prev.winner || prev.drawReason) return prev;
+        const next = cloneState(prev);
+        const player = next.players[next.userWind];
+        if (!player.isReach) return prev;
+
+        player.rinshanReady = false;
+        const tile = player.drawnTile;
+        if (!tile) return prev;
+        const declaredReachThisDiscard = player.ippatsuPrimed;
+
+        player.drawnTile = null;
+        player.discards.push(tile);
+        next.lastDiscard = { from: next.userWind, tile };
+        if (player.ippatsuPrimed) {
+          player.ippatsuPrimed = false;
+          player.ippatsuEligible = true;
+        } else if (player.isReach && player.ippatsuEligible && !declaredReachThisDiscard) {
+          player.ippatsuEligible = false;
+        }
+
+        const ronWinner = findCpuRonWinner(next, tile);
+        if (ronWinner) {
+          return settleWin(next, ronWinner, false, next.userWind, [...next.players[ronWinner].hand, tile], {
+            winningTile: tile,
+            isHoutei: next.wall.length === 0,
+          });
+        }
+
+        next.turn = nextWind(next.userWind);
+        return next;
+      });
+      autoTsumogiriPendingRef.current = false;
+    }, 120);
+
+    return () => {
+      window.clearTimeout(timer);
+      autoTsumogiriPendingRef.current = false;
+    };
+  }, [
+    state.turn,
+    state.userWind,
+    state.prompt,
+    state.winner,
+    state.drawReason,
+    me.isReach,
+    me.drawnTile,
+    canTsumo,
+    canReach,
+    concealedKans.length,
+    canConcealedWindSetKan,
+  ]);
+
   const onReach = async () => {
     if (!canReach) return;
     setState((prev) => {
       const next = cloneState(prev);
       const player = next.players[next.userWind];
-      if (!player.isReach) {
+      const wasReached = player.isReach;
+      if (!wasReached) {
         player.score -= 1000;
         next.kyotaku += 1;
         player.isReach = true;
         if (player.discards.length === 0 && !next.hasOpenCall) {
           player.isDoubleReach = true;
         }
+        player.ippatsuPrimed = true;
+        player.ippatsuEligible = false;
       }
       player.reachCount += 1;
-      player.ippatsuPrimed = true;
-      player.ippatsuEligible = false;
+      if (wasReached) {
+        player.ippatsuPrimed = false;
+      }
       return next;
     });
     await playCommentary("reach", selectedChar);
@@ -1109,7 +1186,7 @@ export default function GamePage() {
   };
 
   const onPon = async () => {
-    if (!state.prompt?.canPon || state.winner || state.drawReason) return;
+    if (!state.prompt?.canPon || state.winner || state.drawReason || state.players[state.userWind].isReach) return;
 
     setState((prev) => {
       const prompt = prev.prompt;
@@ -1135,7 +1212,7 @@ export default function GamePage() {
   };
 
   const onKan = async () => {
-    if (!state.prompt?.canKan || state.winner || state.drawReason) return;
+    if (!state.prompt?.canKan || state.winner || state.drawReason || state.players[state.userWind].isReach) return;
 
     setState((prev) => {
       const prompt = prev.prompt;
@@ -1174,7 +1251,7 @@ export default function GamePage() {
   };
 
   const onChi = async (chiSet: TileType[]) => {
-    if (!state.prompt || state.winner || state.drawReason) return;
+    if (!state.prompt || state.winner || state.drawReason || state.players[state.userWind].isReach) return;
 
     const target = state.prompt.tile;
     const need = chiSet.filter((t) => t !== target);
